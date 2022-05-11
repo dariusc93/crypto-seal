@@ -1,6 +1,5 @@
-use aead::stream::{DecryptorBE32, EncryptorBE32};
-use aead::{Aead, NewAead};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
+
+use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, NewAead, stream::{DecryptorBE32, EncryptorBE32}}};
 use anyhow::{anyhow, bail};
 use ed25519_dalek::{Sha512, Digest, Keypair, Signature, Signer};
 use x25519_dalek::StaticSecret;
