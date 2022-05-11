@@ -1,0 +1,39 @@
+[package]
+name = "crypto-seal"
+description = """
+A small utility designed to securely "package" or seal serde-compatible data type that can passed around in an uncompromised manner.
+"""
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/dariusc93/crypto-seal"
+readme = "README.md"
+categories = ["cryptography"]
+keywords = ["secure"]
+version = "0.1.0"
+authors = ["Darius Clark"]
+edition = "2021"
+exclude = [ ".gitignore" ]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+x25519-dalek = { version = "1" }
+ed25519-dalek = { version = "1" }
+curve25519-dalek = "3.2"
+rsa = { version = "0.5" }
+blake2 = { version = "0.10" }
+sha2   = { version = "0.10" }
+sha3   = { version = "0.10" }
+hmac = "0.12"
+aes-gcm = { version = "0.9" }
+aead = { version = "0.4", features = ["stream"] }
+chacha20poly1305 = { version = "0.9" }
+anyhow = { version = "1" }
+zeroize = "1"
+rand = { version = "0.7" }
+generic-array = "0.14"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[features]
+default = []
