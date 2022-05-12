@@ -12,12 +12,20 @@ pub trait ToSeal {
     fn seal(self) -> anyhow::Result<(PrivateKey, Package<Self>)>;
 }
 
+pub trait ToSealRef {
+    fn seal(&self) -> anyhow::Result<(PrivateKey, Package<Self>)>;
+}
+
 pub trait ToOpen<T>: DeserializeOwned {
     fn open(&self, key: &PrivateKey) -> anyhow::Result<T>;
 }
 
 pub trait ToSealWithKey {
     fn seal(self, private_key: &PrivateKey) -> anyhow::Result<Package<Self>>;
+}
+
+pub trait ToSealRefWithKey {
+    fn seal(&self, private_key: &PrivateKey) -> anyhow::Result<Package<Self>>;
 }
 
 pub trait ToOpenWithKey<T>: DeserializeOwned {
@@ -78,11 +86,40 @@ where
     }
 }
 
+impl<T> ToSealRef for T
+    where
+        T: Serialize + DeserializeOwned + Default + Sized,
+{
+    fn seal(&self) -> anyhow::Result<(PrivateKey, Package<T>)> {
+        let private_key = PrivateKey::new();
+        let mut package = Package::default();
+        let inner_data = serde_json::to_vec(&self)?;
+        package.data = private_key.encrypt(&inner_data, None)?;
+        let sig = private_key.sign(&package.data)?;
+        package.signature = sig;
+        Ok((private_key, package))
+    }
+}
+
 impl<T> ToSealWithKey for T
 where
     T: Serialize + Default + Sized,
 {
     fn seal(self, private_key: &PrivateKey) -> anyhow::Result<Package<T>> {
+        let mut package = Package::default();
+        let inner_data = serde_json::to_vec(&self)?;
+        package.data = private_key.encrypt(&inner_data, None)?;
+        let sig = private_key.sign(&package.data)?;
+        package.signature = sig;
+        Ok(package)
+    }
+}
+
+impl<T> ToSealRefWithKey for T
+    where
+        T: Serialize + Default + Sized,
+{
+    fn seal(&self, private_key: &PrivateKey) -> anyhow::Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
         package.data = private_key.encrypt(&inner_data, None)?;
