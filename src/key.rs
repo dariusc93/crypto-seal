@@ -5,7 +5,7 @@ use ed25519_dalek::{Sha512, Digest, Keypair, Signature, Signer};
 use x25519_dalek::StaticSecret;
 use zeroize::Zeroize;
 use rand::rngs::OsRng;
-use std::io::ErrorKind;
+use std::io;
 
 #[derive(Debug)]
 pub enum PrivateKey {
@@ -107,7 +107,7 @@ impl PrivateKey {
                 let hash = hasher.finalize().to_vec();
                 let enc_hash = self.encrypt(&hash, None)?;
                 Ok(enc_hash)
-            },
+            }
             PrivateKey::Ed25519(key) => {
                 let signature = key.sign(data);
                 Ok(signature.to_bytes().to_vec())
@@ -118,20 +118,20 @@ impl PrivateKey {
     //TODO: Use HMAC for AES
     pub fn sign_reader(
         &self,
-        reader: &mut impl std::io::Read,
+        reader: &mut impl io::Read,
         context: Option<&[u8]>,
     ) -> anyhow::Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
-                std::io::copy(reader, &mut hasher)?;
+                io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
                 let enc_hash = self.encrypt(&hash, None)?;
                 Ok(enc_hash)
-            },
+            }
             PrivateKey::Ed25519(key) => {
                 let mut hasher: Sha512 = Sha512::new();
-                std::io::copy(reader, &mut hasher)?;
+                io::copy(reader, &mut hasher)?;
                 let signature = key.sign_prehashed(hasher, context)?;
                 Ok(signature.to_bytes().to_vec())
             }
@@ -147,10 +147,10 @@ impl PrivateKey {
                 let hash = hasher.finalize().to_vec();
                 let dec_hash = self.decrypt(&signature, None)?;
                 if dec_hash == hash {
-                    return Ok(())
+                    return Ok(());
                 }
                 bail!("Signature is invalid")
-            },
+            }
             PrivateKey::Ed25519(key) => {
                 let signature = Signature::from_bytes(signature)?;
                 key.verify(data, &signature)?;
@@ -162,24 +162,24 @@ impl PrivateKey {
     //TODO: Use HMAC for AES
     pub fn verify_reader(
         &self,
-        reader: &mut impl std::io::Read,
+        reader: &mut impl io::Read,
         signature: &[u8],
         context: Option<&[u8]>,
     ) -> anyhow::Result<()> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
-                std::io::copy(reader, &mut hasher)?;
+                io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
                 let dec_hash = self.decrypt(&signature, None)?;
                 if dec_hash == hash {
-                    return Ok(())
+                    return Ok(());
                 }
                 bail!("Signature is invalid")
-            },
+            }
             PrivateKey::Ed25519(key) => {
                 let mut hasher: Sha512 = Sha512::new();
-                std::io::copy(reader, &mut hasher)?;
+                io::copy(reader, &mut hasher)?;
                 let signature = Signature::from_bytes(signature)?;
                 key.verify_prehashed(hasher, context, &signature)?;
                 Ok(())
@@ -221,11 +221,13 @@ impl PrivateKey {
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(data)
     }
+}
 
+impl PrivateKey {
     pub fn encrypt_stream(
         &self,
-        reader: &mut impl std::io::Read,
-        writer: &mut impl std::io::Write,
+        reader: &mut impl io::Read,
+        writer: &mut impl io::Write,
         pubkey: Option<x25519_dalek::PublicKey>,
     ) -> anyhow::Result<()> {
         let key = self.fetch_encryption_key(pubkey);
@@ -251,7 +253,7 @@ impl PrivateKey {
                     writer.write_all(&ciphertext)?;
                     break;
                 }
-                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => bail!(e),
             }
         }
@@ -260,8 +262,8 @@ impl PrivateKey {
 
     pub fn decrypt_stream(
         &self,
-        reader: &mut impl std::io::Read,
-        writer: &mut impl std::io::Write,
+        reader: &mut impl io::Read,
+        writer: &mut impl io::Write,
         pubkey: Option<x25519_dalek::PublicKey>,
     ) -> anyhow::Result<()> {
         let key = self.fetch_encryption_key(pubkey);
@@ -290,7 +292,7 @@ impl PrivateKey {
                     writer.write_all(&plaintext)?;
                     break;
                 }
-                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => bail!(e),
             };
         }
