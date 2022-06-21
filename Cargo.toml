@@ -25,6 +25,7 @@ sha3   = "0.10"
 hmac = "0.12"
 aes-gcm = { version = "0.9", features = ["stream"] }
 anyhow = "1"
+thiserror = "1"
 zeroize = "1"
 rand = "0.7"
 hex = "0.4"

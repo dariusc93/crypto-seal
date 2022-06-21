@@ -1,10 +1,13 @@
 
 use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, NewAead, stream::{DecryptorBE32, EncryptorBE32}}};
-use anyhow::{anyhow, bail};
 use ed25519_dalek::{Sha512, Digest, Keypair, Signature, Signer};
 use x25519_dalek::StaticSecret;
 use zeroize::Zeroize;
 use rand::rngs::OsRng;
+use crate::{
+    Result,
+    error::Error
+};
 use std::io;
 
 #[derive(Debug)]
@@ -71,14 +74,13 @@ impl PrivateKey {
         }
     }
 
-    pub fn import(key_type: PrivateKeyType, key: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn import(key_type: PrivateKeyType, key: Vec<u8>) -> Result<Self> {
         match key_type {
             PrivateKeyType::Ed25519 => Ok(Keypair::from_bytes(&key).map(PrivateKey::Ed25519)?),
             PrivateKeyType::Aes256 => {
                 let key: [u8; 32] = key
                     .as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Unable to parse key: {}", e))?;
+                    .try_into()?;
                 Ok(PrivateKey::Aes256(key))
             }
         }
@@ -91,15 +93,15 @@ impl PrivateKey {
         }
     }
 
-    pub fn public_key(&self) -> anyhow::Result<PublicKey> {
+    pub fn public_key(&self) -> Result<PublicKey> {
         match self {
-            PrivateKey::Aes256(_) => bail!("Unsupported"),
+            PrivateKey::Aes256(_) => Err(Error::Unsupported),
             PrivateKey::Ed25519(key) => Ok(PublicKey::Ed25519(key.public)),
         }
     }
 
     //TODO: Use HMAC for AES
-    pub fn sign(&self, data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -120,7 +122,7 @@ impl PrivateKey {
         &self,
         reader: &mut impl io::Read,
         context: Option<&[u8]>,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -139,7 +141,7 @@ impl PrivateKey {
     }
 
     //TODO: Use HMAC for AES
-    pub fn verify(&self, data: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -149,7 +151,7 @@ impl PrivateKey {
                 if dec_hash == hash {
                     return Ok(());
                 }
-                bail!("Signature is invalid")
+                return Err(Error::InvalidSignature)
             }
             PrivateKey::Ed25519(key) => {
                 let signature = Signature::from_bytes(signature)?;
@@ -165,7 +167,7 @@ impl PrivateKey {
         reader: &mut impl io::Read,
         signature: &[u8],
         context: Option<&[u8]>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -175,7 +177,7 @@ impl PrivateKey {
                 if dec_hash == hash {
                     return Ok(());
                 }
-                bail!("Signature is invalid")
+                return Err(Error::InvalidSignature)
             }
             PrivateKey::Ed25519(key) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -193,7 +195,7 @@ impl PrivateKey {
         &self,
         data: &[u8],
         pubkey: Option<x25519_dalek::PublicKey>,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey);
         let raw_nonce = crate::generate(12);
         let key = Key::from_slice(&key);
@@ -201,7 +203,7 @@ impl PrivateKey {
         let cipher = Aes256Gcm::new(key);
         let mut data = cipher
             .encrypt(nonce, data)
-            .map_err(|e| anyhow::anyhow!(e))?;
+            .map_err(|_| Error::EncryptionError)?;
         data.extend(nonce);
         Ok(data)
     }
@@ -210,7 +212,7 @@ impl PrivateKey {
         &self,
         data: &[u8],
         pubkey: Option<x25519_dalek::PublicKey>,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey);
         let (nonce, data) = Self::extract_data_slice(data, 12);
         let key = Key::from_slice(&key);
@@ -218,7 +220,7 @@ impl PrivateKey {
         let cipher = Aes256Gcm::new(key);
         let data = cipher
             .decrypt(nonce, data)
-            .map_err(|e| anyhow::anyhow!(e))?;
+            .map_err(|_| Error::DecryptionError)?;
         Ok(data)
     }
 }
@@ -229,7 +231,7 @@ impl PrivateKey {
         reader: &mut impl io::Read,
         writer: &mut impl io::Write,
         pubkey: Option<x25519_dalek::PublicKey>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let key = self.fetch_encryption_key(pubkey);
         let nonce = crate::generate(7);
 
@@ -243,18 +245,18 @@ impl PrivateKey {
                 Ok(WRITE_BUFFER_SIZE) => {
                     let ciphertext = stream
                         .encrypt_next(buffer.as_slice())
-                        .map_err(|err| anyhow::anyhow!(err))?;
+                        .map_err(|_| Error::EncryptionStreamError)?;
                     writer.write_all(&ciphertext)?;
                 }
                 Ok(read_count) => {
                     let ciphertext = stream
                         .encrypt_last(&buffer[..read_count])
-                        .map_err(|err| anyhow::anyhow!(err))?;
+                        .map_err(|_| Error::EncryptionStreamError)?;
                     writer.write_all(&ciphertext)?;
                     break;
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => bail!(e),
+                Err(e) => return Err(Error::from(e)),
             }
         }
         Ok(())
@@ -265,7 +267,7 @@ impl PrivateKey {
         reader: &mut impl io::Read,
         writer: &mut impl io::Write,
         pubkey: Option<x25519_dalek::PublicKey>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let key = self.fetch_encryption_key(pubkey);
         let mut nonce = vec![0u8; 7];
         reader.read_exact(&mut nonce)?;
@@ -280,7 +282,7 @@ impl PrivateKey {
                 Ok(READ_BUFFER_SIZE) => {
                     let plaintext = stream
                         .decrypt_next(buffer.as_slice())
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                        .map_err(|_| Error::DecryptionStreamError)?;
 
                     writer.write_all(&plaintext)?
                 }
@@ -288,12 +290,12 @@ impl PrivateKey {
                 Ok(read_count) => {
                     let plaintext = stream
                         .decrypt_last(&buffer[..read_count])
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                        .map_err(|_| Error::DecryptionStreamError)?;
                     writer.write_all(&plaintext)?;
                     break;
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => bail!(e),
+                Err(e) => return Err(Error::from(e)),
             };
         }
         writer.flush()?;

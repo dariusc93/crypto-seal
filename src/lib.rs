@@ -1,43 +1,46 @@
 pub mod key;
+pub mod error;
 
-use anyhow::anyhow;
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 use zeroize::Zeroize;
 use rand::{rngs::OsRng, RngCore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use crate::error::Error;
 
 use crate::key::PrivateKey;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 pub trait ToSeal {
-    fn seal(self) -> anyhow::Result<(PrivateKey, Package<Self>)>;
+    fn seal(self) -> Result<(PrivateKey, Package<Self>)>;
 }
 
 pub trait ToSealRef {
-    fn seal(&self) -> anyhow::Result<(PrivateKey, Package<Self>)>;
+    fn seal(&self) -> Result<(PrivateKey, Package<Self>)>;
 }
 
 pub trait ToOpen<T>: DeserializeOwned {
-    fn open(&self, key: &PrivateKey) -> anyhow::Result<T>;
+    fn open(&self, key: &PrivateKey) -> Result<T>;
 }
 
 pub trait ToSealWithKey {
-    fn seal(self, private_key: &PrivateKey) -> anyhow::Result<Package<Self>>;
+    fn seal(self, private_key: &PrivateKey) -> Result<Package<Self>>;
 }
 
 pub trait ToSealRefWithKey {
-    fn seal(&self, private_key: &PrivateKey) -> anyhow::Result<Package<Self>>;
+    fn seal(&self, private_key: &PrivateKey) -> Result<Package<Self>>;
 }
 
 pub trait ToOpenWithKey<T>: DeserializeOwned {
-    fn open(&self) -> anyhow::Result<T>;
+    fn open(&self) -> Result<T>;
 }
 
 pub trait ToSignWithKey {
-    fn sign(&mut self, key: &PrivateKey) -> anyhow::Result<()>;
+    fn sign(&mut self, key: &PrivateKey) -> Result<()>;
 }
 
 pub trait ToVerify<T> {
-    fn verify(&self, key: &PrivateKey) -> anyhow::Result<()>;
+    fn verify(&self, key: &PrivateKey) -> Result<()>;
 }
 
 #[derive(Default, Deserialize, Serialize, Clone, Debug, Zeroize)]
@@ -75,7 +78,7 @@ impl<T> ToSeal for T
 where
     T: Serialize + DeserializeOwned + Default + Sized,
 {
-    fn seal(self) -> anyhow::Result<(PrivateKey, Package<T>)> {
+    fn seal(self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
@@ -90,7 +93,7 @@ impl<T> ToSealRef for T
     where
         T: Serialize + DeserializeOwned + Default + Sized,
 {
-    fn seal(&self) -> anyhow::Result<(PrivateKey, Package<T>)> {
+    fn seal(&self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
@@ -105,7 +108,7 @@ impl<T> ToSealWithKey for T
 where
     T: Serialize + Default + Sized,
 {
-    fn seal(self, private_key: &PrivateKey) -> anyhow::Result<Package<T>> {
+    fn seal(self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
         package.data = private_key.encrypt(&inner_data, None)?;
@@ -119,7 +122,7 @@ impl<T> ToSealRefWithKey for T
     where
         T: Serialize + Default + Sized,
 {
-    fn seal(&self, private_key: &PrivateKey) -> anyhow::Result<Package<T>> {
+    fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
         package.data = private_key.encrypt(&inner_data, None)?;
@@ -133,16 +136,16 @@ impl<T> ToOpen<T> for Package<T>
 where
     T: DeserializeOwned,
 {
-    fn open(&self, key: &PrivateKey) -> anyhow::Result<T> {
+    fn open(&self, key: &PrivateKey) -> Result<T> {
         key.verify(&self.data, &self.signature)?;
         key.decrypt(&self.data, None)
-            .and_then(|ptext| serde_json::from_slice(&ptext[..]).map_err(|e| anyhow::anyhow!(e)))
+            .and_then(|ptext| serde_json::from_slice(&ptext[..]).map_err(Error::from))
     }
 }
 
 impl<T> ToSignWithKey for Package<T>
 {
-    fn sign(&mut self, key: &PrivateKey) -> anyhow::Result<()> {
+    fn sign(&mut self, key: &PrivateKey) -> Result<()> {
         self.signature = key.sign(&self.data)?;
         Ok(())
     }
@@ -150,9 +153,8 @@ impl<T> ToSignWithKey for Package<T>
 
 impl<T> ToVerify<T> for Package<T>
 {
-    fn verify(&self, key: &PrivateKey) -> anyhow::Result<()> {
+    fn verify(&self, key: &PrivateKey) -> Result<()> {
         key.verify(&self.data, &self.signature)
-            .map_err(|e| anyhow!(e))
     }
 }
 
