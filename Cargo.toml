@@ -3,6 +3,7 @@ name = "crypto-seal"
 description = """
 A small utility designed to securely "package" or seal serde-compatible data type that can passed around in an uncompromised manner.
 """
+rust-version = "1.60"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/dariusc93/crypto-seal"
 readme = "README.md"
