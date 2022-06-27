@@ -5,8 +5,8 @@ use core::marker::PhantomData;
 use zeroize::Zeroize;
 use rand::{rngs::OsRng, RngCore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use crate::error::Error;
 
+use crate::error::Error;
 use crate::key::PrivateKey;
 
 pub type Result<T> = std::result::Result<T, Error>;

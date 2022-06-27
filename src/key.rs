@@ -63,7 +63,7 @@ impl PrivateKey {
         match key_type {
             PrivateKeyType::Ed25519 => {
                 let mut csprng = OsRng {};
-                let key = ed25519_dalek::Keypair::generate(&mut csprng);
+                let key = Keypair::generate(&mut csprng);
                 PrivateKey::Ed25519(key)
             }
             PrivateKeyType::Aes256 => {
@@ -76,7 +76,7 @@ impl PrivateKey {
 
     pub fn import(key_type: PrivateKeyType, key: Vec<u8>) -> Result<Self> {
         match key_type {
-            PrivateKeyType::Ed25519 => Ok(Keypair::from_bytes(&key).map(PrivateKey::Ed25519)?),
+            PrivateKeyType::Ed25519 => Keypair::from_bytes(&key).map(PrivateKey::Ed25519).map_err(Error::from),
             PrivateKeyType::Aes256 => {
                 let key: [u8; 32] = key
                     .as_slice()
@@ -218,10 +218,9 @@ impl PrivateKey {
         let key = Key::from_slice(&key);
         let nonce = Nonce::from_slice(&nonce);
         let cipher = Aes256Gcm::new(key);
-        let data = cipher
+        cipher
             .decrypt(nonce, data)
-            .map_err(|_| Error::DecryptionError)?;
-        Ok(data)
+            .map_err(|_| Error::DecryptionError)
     }
 }
 
