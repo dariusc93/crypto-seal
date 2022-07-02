@@ -1,6 +1,7 @@
 use crypto_seal::key::PrivateKey;
+use crypto_seal::error::Error;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Error> {
     let private_key = PrivateKey::new();
 
     let plaintext = b"Hello, World!";

@@ -1,6 +1,6 @@
-use crypto_seal::{ToOpen, ToSeal, ToVerify};
+use crypto_seal::{ToOpen, ToSeal, ToVerify, error::Error};
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Error> {
 
     let my_data = b"Hello, World!";
 
