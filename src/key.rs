@@ -1,19 +1,31 @@
-
-use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, NewAead, stream::{DecryptorBE32, EncryptorBE32}}};
-use ed25519_dalek::{Sha512, Digest, Keypair, Signature, Signer};
+use crate::{error::Error, Result};
+use aes_gcm::{
+    aead::{
+        stream::{DecryptorBE32, EncryptorBE32},
+        Aead, NewAead,
+    },
+    Aes256Gcm, Key, Nonce,
+};
+use ed25519_dalek::{Digest, Keypair, Sha512, Signature, Signer};
+use rand::rngs::OsRng;
+use std::io;
 use x25519_dalek::StaticSecret;
 use zeroize::Zeroize;
-use rand::rngs::OsRng;
-use crate::{
-    Result,
-    error::Error
-};
-use std::io;
 
+/// Container of private keys
+/// The following is supported
+/// - [`ed25519_dalek`]
+/// - [`aes_gcm::Aes256Gcm`]
 #[derive(Debug)]
 pub enum PrivateKey {
     Ed25519(Keypair),
     Aes256([u8; 32]),
+}
+
+impl Default for PrivateKey {
+    fn default() -> Self {
+        Self::new_with(PrivateKeyType::default())
+    }
 }
 
 impl Zeroize for PrivateKey {
@@ -35,13 +47,20 @@ impl Drop for PrivateKey {
     }
 }
 
+/// Container of public keys
+/// The following is supported
+/// - [`ed25519_dalek::PublicKey`]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::PublicKey),
 }
 
+/// [`PrivateKey`] Types
 #[derive(Debug, Copy, Clone)]
 pub enum PrivateKeyType {
+    /// ED25519 Private Key
     Ed25519,
+
+    /// AES-256 Private Key
     Aes256,
 }
 
@@ -55,10 +74,12 @@ const WRITE_BUFFER_SIZE: usize = 512;
 const READ_BUFFER_SIZE: usize = 528;
 
 impl PrivateKey {
+    /// Generates a new [`PrivateKey`] with randomly generated key
     pub fn new() -> Self {
-        Self::new_with(PrivateKeyType::default())
+        Self::default()
     }
 
+    /// Generate a [`PrivateKey`] using [`PrivateKeyType`]
     pub fn new_with(key_type: PrivateKeyType) -> Self {
         match key_type {
             PrivateKeyType::Ed25519 => {
@@ -74,18 +95,20 @@ impl PrivateKey {
         }
     }
 
+    /// Import private key which is identified with [`PrivateKeyType`]
     pub fn import(key_type: PrivateKeyType, key: Vec<u8>) -> Result<Self> {
         match key_type {
-            PrivateKeyType::Ed25519 => Keypair::from_bytes(&key).map(PrivateKey::Ed25519).map_err(Error::from),
+            PrivateKeyType::Ed25519 => Keypair::from_bytes(&key)
+                .map(PrivateKey::Ed25519)
+                .map_err(Error::from),
             PrivateKeyType::Aes256 => {
-                let key: [u8; 32] = key
-                    .as_slice()
-                    .try_into()?;
+                let key: [u8; 32] = key.as_slice().try_into()?;
                 Ok(PrivateKey::Aes256(key))
             }
         }
     }
 
+    /// Provides the [`PrivateKeyType`] of the [`PrivateKey`]
     pub fn key_type(&self) -> PrivateKeyType {
         match self {
             PrivateKey::Aes256(_) => PrivateKeyType::Aes256,
@@ -93,6 +116,9 @@ impl PrivateKey {
         }
     }
 
+    /// Provides the [`PublicKey`] of the [`PrivateKey`]
+    /// Note: This will only work with asymmetric keys. Any symmetric keys will
+    ///       return [`Error::Unsupported`]
     pub fn public_key(&self) -> Result<PublicKey> {
         match self {
             PrivateKey::Aes256(_) => Err(Error::Unsupported),
@@ -100,6 +126,9 @@ impl PrivateKey {
         }
     }
 
+    /// Sign the data provided using [`PrivateKey`]
+    /// Note: If a symmetric key is used, it will encrypt the hash.
+    ///       This will change in the future to use HMAC instead
     //TODO: Use HMAC for AES
     pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
         match self {
@@ -117,6 +146,9 @@ impl PrivateKey {
         }
     }
 
+    /// Sign the data from [`std::io::Read`] using [`PrivateKey`]
+    /// Note: If a symmetric key is used, it will encrypt the hash.
+    ///       This will change in the future to use HMAC instead
     //TODO: Use HMAC for AES
     pub fn sign_reader(
         &self,
@@ -140,6 +172,9 @@ impl PrivateKey {
         }
     }
 
+    /// Verify the signature of the data provided using [`PrivateKey`]
+    /// Note: If a symmetric key is used, it will decrypt the hash.
+    ///       This will change in the future to use HMAC instead
     //TODO: Use HMAC for AES
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         match self {
@@ -151,7 +186,7 @@ impl PrivateKey {
                 if dec_hash == hash {
                     return Ok(());
                 }
-                return Err(Error::InvalidSignature)
+                return Err(Error::InvalidSignature);
             }
             PrivateKey::Ed25519(key) => {
                 let signature = Signature::from_bytes(signature)?;
@@ -161,6 +196,9 @@ impl PrivateKey {
         }
     }
 
+    /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
+    /// Note: If a symmetric key is used, it will decrypt the hash.
+    ///       This will change in the future to use HMAC instead
     //TODO: Use HMAC for AES
     pub fn verify_reader(
         &self,
@@ -177,7 +215,7 @@ impl PrivateKey {
                 if dec_hash == hash {
                     return Ok(());
                 }
-                return Err(Error::InvalidSignature)
+                return Err(Error::InvalidSignature);
             }
             PrivateKey::Ed25519(key) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -191,11 +229,12 @@ impl PrivateKey {
 }
 
 impl PrivateKey {
-    pub fn encrypt(
-        &self,
-        data: &[u8],
-        pubkey: Option<x25519_dalek::PublicKey>,
-    ) -> Result<Vec<u8>> {
+    /// Encrypt the data using [`PrivateKey`].
+    ///
+    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
+    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact encryption
+    pub fn encrypt(&self, data: &[u8], pubkey: Option<x25519_dalek::PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey);
         let raw_nonce = crate::generate(12);
         let key = Key::from_slice(&key);
@@ -208,11 +247,12 @@ impl PrivateKey {
         Ok(data)
     }
 
-    pub fn decrypt(
-        &self,
-        data: &[u8],
-        pubkey: Option<x25519_dalek::PublicKey>,
-    ) -> Result<Vec<u8>> {
+    /// Decrypt the data using [`PrivateKey`].
+    ///
+    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
+    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact decryption
+    pub fn decrypt(&self, data: &[u8], pubkey: Option<x25519_dalek::PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey);
         let (nonce, data) = Self::extract_data_slice(data, 12);
         let key = Key::from_slice(&key);
@@ -225,6 +265,11 @@ impl PrivateKey {
 }
 
 impl PrivateKey {
+    /// Encrypt the data stream from [`std::io::Read`] to [`std::io::Write`] using [`PrivateKey`].
+    ///
+    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
+    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact encryption
     pub fn encrypt_stream(
         &self,
         reader: &mut impl io::Read,
@@ -261,6 +306,11 @@ impl PrivateKey {
         Ok(())
     }
 
+    /// Decrypt the data stream from [`std::io::Read`] to [`std::io::Write`] using [`PrivateKey`].
+    ///
+    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
+    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact decryption
     pub fn decrypt_stream(
         &self,
         reader: &mut impl io::Read,
@@ -301,6 +351,13 @@ impl PrivateKey {
         Ok(())
     }
 
+    /// Used internally to obtain the encryption key
+    /// If the key type is [`PrivateKeyType::Aes256`], it will use the key directly from [`PrivateKey::Aes256`],
+    /// If the key type is [`PrivateKeyType::Ed25519`],it will convert our private key to [`x25519_dalek::StaticSecret`]
+    /// and perform a check on the pubkey input to determine if its [`Option::is_some`]. If true it will perform a key exchange between our
+    /// [`x25519_dalek::StaticSecret`] and the supplied [`x25519_dalek::PublicKey`]. If false,
+    /// we perform a key exchange with our own [`x25519_dalek::PublicKey`] derived from [`x25519_dalek::StaticSecret`]
+    /// and return the key.
     fn fetch_encryption_key(&self, pubkey: Option<x25519_dalek::PublicKey>) -> Vec<u8> {
         match self {
             PrivateKey::Aes256(key) => key.to_vec(),
@@ -323,6 +380,7 @@ impl PrivateKey {
         }
     }
 
+    /// Used internally to split data based on the supplied sized.
     fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
         let extracted = &data[data.len() - size..];
         let payload = &data[..data.len() - size];
