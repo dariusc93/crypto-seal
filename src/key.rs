@@ -6,10 +6,10 @@ use aes_gcm::{
     },
     Aes256Gcm, Key, Nonce,
 };
-use ed25519_dalek::{Digest, Keypair, Sha512, Signature, Signer};
+use curve25519_dalek::edwards::CompressedEdwardsY;
+use ed25519_dalek::{Digest, Keypair, Sha512, Signature, Signer, Verifier};
 use rand::rngs::OsRng;
 use std::io;
-use x25519_dalek::StaticSecret;
 use zeroize::Zeroize;
 
 /// Container of private keys
@@ -50,10 +50,73 @@ impl Drop for PrivateKey {
 /// Container of public keys
 /// The following is supported
 /// - [`ed25519_dalek::PublicKey`]
+#[derive(Debug, Clone)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::PublicKey),
 }
 
+impl PublicKey {
+
+    /// Import a public key from bytes
+    /// Note: This only supports ED25519 at this time
+    pub fn from_bytes(bytes: &[u8]) -> Result<PublicKey> {
+        let pk = ed25519_dalek::PublicKey::from_bytes(bytes)?;
+        Ok(PublicKey::Ed25519(pk))
+    }
+
+    /// Convert the [`PublicKey`] to a byte array
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            PublicKey::Ed25519(public_key) => {
+                public_key.to_bytes().to_vec()
+            }
+        }
+    }
+
+    /// Convert the [`PublicKey`] to a [`x25519_dalek::PublicKey`]
+    pub fn to_x25519_public_key(&self) -> Result<x25519_dalek::PublicKey> {
+        let PublicKey::Ed25519(pk) = self;
+        let ep = CompressedEdwardsY(pk.to_bytes())
+            .decompress()
+            .ok_or(Error::Unsupported)?; //Note: This should not error here
+        let mon = ep.to_montgomery();
+        Ok(x25519_dalek::PublicKey::from(mon.0))
+    }
+
+}
+
+impl PublicKey {
+    /// Verify the signature of the data provided using [`PrivateKey`]
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        match self {
+            PublicKey::Ed25519(pubkey) => {
+                let signature = Signature::from_bytes(signature)?;
+                pubkey.verify(data, &signature)?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl PublicKey {
+    /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
+    pub fn verify_reader(
+        &self,
+        reader: &mut impl io::Read,
+        signature: &[u8],
+        context: Option<&[u8]>,
+    ) -> Result<()> {
+        match self {
+            PublicKey::Ed25519(key) => {
+                let mut hasher: Sha512 = Sha512::new();
+                io::copy(reader, &mut hasher)?;
+                let signature = Signature::from_bytes(signature)?;
+                key.verify_prehashed(hasher, context, &signature)?;
+                Ok(())
+            }
+        }
+    }
+}
 /// [`PrivateKey`] Types
 #[derive(Debug, Copy, Clone)]
 pub enum PrivateKeyType {
@@ -123,6 +186,24 @@ impl PrivateKey {
         match self {
             PrivateKey::Aes256(_) => Err(Error::Unsupported),
             PrivateKey::Ed25519(key) => Ok(PublicKey::Ed25519(key.public)),
+        }
+    }
+
+    /// Converts the [`PrivateKey`] to a [`x25519_dalek::StaticSecret`]
+    /// Note: Only [`PrivateKey::Ed25519`] is supported
+    pub fn to_x25519(&self) -> Result<x25519_dalek::StaticSecret> {
+        match self {
+            PrivateKey::Aes256(_) => return Err(Error::Unsupported),
+            PrivateKey::Ed25519(kp) => {
+                let mut hasher: Sha512 = Sha512::new();
+                hasher.update(kp.secret.as_ref());
+                let hash = hasher.finalize().to_vec();
+                let mut new_sk: [u8; 32] = [0; 32];
+                new_sk.copy_from_slice(&hash[..32]);
+                let sk = x25519_dalek::StaticSecret::from(new_sk);
+                new_sk.zeroize();
+                Ok(sk)
+            }
         }
     }
 
@@ -234,8 +315,8 @@ impl PrivateKey {
     /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
     /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact encryption
-    pub fn encrypt(&self, data: &[u8], pubkey: Option<x25519_dalek::PublicKey>) -> Result<Vec<u8>> {
-        let key = self.fetch_encryption_key(pubkey);
+    pub fn encrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
+        let key = self.fetch_encryption_key(pubkey)?;
         let raw_nonce = crate::generate(12);
         let key = Key::from_slice(&key);
         let nonce = Nonce::from_slice(&raw_nonce);
@@ -252,8 +333,8 @@ impl PrivateKey {
     /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
     /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact decryption
-    pub fn decrypt(&self, data: &[u8], pubkey: Option<x25519_dalek::PublicKey>) -> Result<Vec<u8>> {
-        let key = self.fetch_encryption_key(pubkey);
+    pub fn decrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
+        let key = self.fetch_encryption_key(pubkey)?;
         let (nonce, data) = Self::extract_data_slice(data, 12);
         let key = Key::from_slice(&key);
         let nonce = Nonce::from_slice(&nonce);
@@ -274,9 +355,9 @@ impl PrivateKey {
         &self,
         reader: &mut impl io::Read,
         writer: &mut impl io::Write,
-        pubkey: Option<x25519_dalek::PublicKey>,
+        pubkey: Option<PublicKey>,
     ) -> Result<()> {
-        let key = self.fetch_encryption_key(pubkey);
+        let key = self.fetch_encryption_key(pubkey)?;
         let nonce = crate::generate(7);
 
         let key = Key::from_slice(&key);
@@ -315,9 +396,9 @@ impl PrivateKey {
         &self,
         reader: &mut impl io::Read,
         writer: &mut impl io::Write,
-        pubkey: Option<x25519_dalek::PublicKey>,
+        pubkey: Option<PublicKey>,
     ) -> Result<()> {
-        let key = self.fetch_encryption_key(pubkey);
+        let key = self.fetch_encryption_key(pubkey)?;
         let mut nonce = vec![0u8; 7];
         reader.read_exact(&mut nonce)?;
 
@@ -355,27 +436,25 @@ impl PrivateKey {
     /// If the key type is [`PrivateKeyType::Aes256`], it will use the key directly from [`PrivateKey::Aes256`],
     /// If the key type is [`PrivateKeyType::Ed25519`],it will convert our private key to [`x25519_dalek::StaticSecret`]
     /// and perform a check on the pubkey input to determine if its [`Option::is_some`]. If true it will perform a key exchange between our
-    /// [`x25519_dalek::StaticSecret`] and the supplied [`x25519_dalek::PublicKey`]. If false,
-    /// we perform a key exchange with our own [`x25519_dalek::PublicKey`] derived from [`x25519_dalek::StaticSecret`]
+    /// [`x25519_dalek::StaticSecret`] and the supplied [`PublicKey`], which is converted to [`x25519_dalek::PublicKey`]. If false,
+    /// we perform a key exchange with our own [`x25519_dalek::PublicKey`] derived from generated [`x25519_dalek::StaticSecret`]
     /// and return the key.
-    fn fetch_encryption_key(&self, pubkey: Option<x25519_dalek::PublicKey>) -> Vec<u8> {
+    fn fetch_encryption_key(&self, pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         match self {
-            PrivateKey::Aes256(key) => key.to_vec(),
-            PrivateKey::Ed25519(key) => {
-                //TODO: Check to determine if this would be the right method of
-                //      converting E25519 to X25519
-                let static_key = StaticSecret::from(key.secret.to_bytes());
+            PrivateKey::Aes256(key) => Ok(key.to_vec()),
+            PrivateKey::Ed25519(_) => {
+                let static_key = self.to_x25519()?;
                 let public_key = match pubkey {
-                    //Note: This may not be ideal to use one own public key for
+                    //Note: This may not be ideal to use one own key for
                     //      performing a ecdh exchange. While there is no known
                     //      attack, we should still be cautious of performing
                     //      this and might be wise in the future to have dual
                     //      keys. One ed25519 and another x25519
-                    Some(pubkey) => pubkey,
+                    Some(pubkey) => pubkey.to_x25519_public_key()?,
                     None => x25519_dalek::PublicKey::from(&static_key),
                 };
                 let enc_key = static_key.diffie_hellman(&public_key);
-                enc_key.as_bytes().to_vec()
+                Ok(enc_key.as_bytes().to_vec())
             }
         }
     }

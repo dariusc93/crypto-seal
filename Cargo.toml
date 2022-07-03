@@ -20,9 +20,7 @@ exclude = [ ".gitignore" ]
 x25519-dalek = "1"
 ed25519-dalek = "1"
 curve25519-dalek = "3.2"
-blake2 = "0.10"
 sha2   = "0.10"
-sha3   = "0.10"
 hmac = "0.12"
 aes-gcm = { version = "0.9", features = ["stream"] }
 anyhow = "1"

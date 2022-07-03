@@ -12,28 +12,28 @@ use crate::key::PrivateKey;
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait ToSeal {
-    /// Consume and encrypt a [`serde::Deserialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
+    /// Consume and encrypt a [`serde::Serialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
     fn seal(self) -> Result<(PrivateKey, Package<Self>)>;
 }
 
 pub trait ToSealRef {
-    /// Borrow and encrypt a [`serde::Deserialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
+    /// Borrow and encrypt a [`serde::Serialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
     fn seal(&self) -> Result<(PrivateKey, Package<Self>)>;
+}
+
+pub trait ToSealWithKey {
+    /// Consume and encrypt a [`serde::Serialize`] compatible type with the supplied [`PrivateKey`] and return a [`Package`]
+    fn seal(self, private_key: &PrivateKey) -> Result<Package<Self>>;
+}
+
+pub trait ToSealRefWithKey {
+    /// Borrow and encrypt a [`serde::Serialize`] compatible type with the supplied [`PrivateKey`] and return a [`Package`]
+    fn seal(&self, private_key: &PrivateKey) -> Result<Package<Self>>;
 }
 
 pub trait ToOpen<T>: DeserializeOwned {
     /// Decrypts [`Package`] using [`PrivateKey`] and returns defined type
     fn open(&self, key: &PrivateKey) -> Result<T>;
-}
-
-pub trait ToSealWithKey {
-    /// Consume and encrypt a [`serde::Deserialize`] compatible type with the supplied [`PrivateKey`] and return a [`Package`]
-    fn seal(self, private_key: &PrivateKey) -> Result<Package<Self>>;
-}
-
-pub trait ToSealRefWithKey {
-    /// Borrow and encrypt a [`serde::Deserialize`] compatible type with the supplied [`PrivateKey`] and return a [`Package`]
-    fn seal(&self, private_key: &PrivateKey) -> Result<Package<Self>>;
 }
 
 pub trait ToOpenWithKey<T>: DeserializeOwned {
