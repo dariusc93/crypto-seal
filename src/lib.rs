@@ -40,12 +40,12 @@ pub trait ToSealRefWithSharedKey {
     fn seal(&self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<Self>>;
 }
 
-pub trait ToOpen<T>: DeserializeOwned {
+pub trait ToOpen<T> {
     /// Decrypts [`Package`] using [`PrivateKey`] and returns defined type
     fn open(&self, key: &PrivateKey) -> Result<T>;
 }
 
-pub trait ToOpenWithSharedKey<T>: DeserializeOwned {
+pub trait ToOpenWithSharedKey<T> {
     /// Decrypts [`Package`] using [`PrivateKey`] using the recipient [`PublicKey`] and returns defined type
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T>;
 }
@@ -138,7 +138,7 @@ where
 
 impl<T> ToSeal for T
 where
-    T: Serialize + DeserializeOwned + Default + Sized,
+    T: Serialize + Default,
 {
     fn seal(self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
@@ -156,7 +156,7 @@ where
 
 impl<T> ToSealRef for T
 where
-    T: Serialize + DeserializeOwned + Default + Sized,
+    T: Serialize + Default,
 {
     fn seal(&self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
@@ -174,7 +174,7 @@ where
 
 impl<T> ToSealWithKey for T
 where
-    T: Serialize + Default + Sized,
+    T: Serialize + Default,
 {
     fn seal(self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
@@ -191,7 +191,7 @@ where
 
 impl<T> ToSealRefWithKey for T
 where
-    T: Serialize + Default + Sized,
+    T: Serialize + Default,
 {
     fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
@@ -208,7 +208,7 @@ where
 
 impl<T> ToSealWithSharedKey for T
 where
-    T: Serialize + Default + Sized,
+    T: Serialize + Default,
 {
     fn seal(self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<T>> {
         let mut package = Package::default();
@@ -223,7 +223,7 @@ where
 
 impl<T> ToSealRefWithSharedKey for T
 where
-    T: Serialize + Default + Sized,
+    T: Serialize + Default,
 {
     fn seal(&self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<T>> {
         let mut package = Package::default();
