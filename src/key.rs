@@ -335,7 +335,7 @@ impl PrivateKey {
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact decryption
     pub fn decrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
-        let (nonce, data) = Self::extract_data_slice(data, 12);
+        let (nonce, data) = extract_data_slice(data, 12);
         let key = Key::from_slice(&key);
         let nonce = Nonce::from_slice(&nonce);
         let cipher = Aes256Gcm::new(key);
@@ -458,16 +458,16 @@ impl PrivateKey {
             }
         }
     }
-
-    /// Used internally to split data based on the supplied sized.
-    fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
-        let extracted = &data[data.len() - size..];
-        let payload = &data[..data.len() - size];
-        (extracted, payload)
-    }
 }
 
-/// Used to generate random amount of data and store it in a Vec with a specific capacity 
+/// Used internally to split data based on the supplied sized.
+fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
+    let extracted = &data[data.len() - size..];
+    let payload = &data[..data.len() - size];
+    (extracted, payload)
+}
+
+/// Used to generate random amount of data and store it in a Vec with a specific capacity
 fn generate(size: usize) -> Vec<u8> {
     use rand::RngCore;
     let mut buffer = vec![0u8; size];

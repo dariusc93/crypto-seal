@@ -252,7 +252,7 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
-        ToVerify::<T>::verify(self)?;
+        ToVerify::verify(self)?;
         key.decrypt(&self.data, Some(public_key.clone()))
             .and_then(|ptext| serde_json::from_slice(&ptext[..]).map_err(Error::from))
     }
