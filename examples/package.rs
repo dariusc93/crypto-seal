@@ -6,7 +6,7 @@ fn main() -> Result<(), Error> {
 
     let (my_key, sealed_data) = my_data.seal()?;
 
-    sealed_data.verify(&my_key)?;
+    sealed_data.verify()?;
 
     let unsealed_data = sealed_data.open(&my_key)?;
 
