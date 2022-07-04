@@ -2,7 +2,6 @@ pub mod error;
 pub mod key;
 
 use core::marker::PhantomData;
-use rand::{rngs::OsRng, RngCore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zeroize::Zeroize;
 
@@ -278,10 +277,4 @@ impl<T> ToVerifyWithKey<T> for Package<T> {
     fn verify(&self, key: &PrivateKey) -> Result<()> {
         key.verify(&self.data, &self.signature)
     }
-}
-
-pub fn generate(size: usize) -> Vec<u8> {
-    let mut buffer = vec![0u8; size];
-    OsRng.fill_bytes(&mut buffer);
-    buffer
 }

@@ -152,7 +152,7 @@ impl PrivateKey {
             }
             PrivateKeyType::Aes256 => {
                 let mut key_sized = [0u8; 32];
-                key_sized.copy_from_slice(&crate::generate(32));
+                key_sized.copy_from_slice(&generate(32));
                 PrivateKey::Aes256(key_sized)
             }
         }
@@ -317,7 +317,7 @@ impl PrivateKey {
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact encryption
     pub fn encrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
-        let raw_nonce = crate::generate(12);
+        let raw_nonce = generate(12);
         let key = Key::from_slice(&key);
         let nonce = Nonce::from_slice(&raw_nonce);
         let cipher = Aes256Gcm::new(key);
@@ -358,7 +358,7 @@ impl PrivateKey {
         pubkey: Option<PublicKey>,
     ) -> Result<()> {
         let key = self.fetch_encryption_key(pubkey)?;
-        let nonce = crate::generate(7);
+        let nonce = generate(7);
 
         let key = Key::from_slice(&key);
         let cipher = Aes256Gcm::new(key);
@@ -465,4 +465,12 @@ impl PrivateKey {
         let payload = &data[..data.len() - size];
         (extracted, payload)
     }
+}
+
+/// Used to generate random amount of data and store it in a Vec with a specific capacity 
+fn generate(size: usize) -> Vec<u8> {
+    use rand::RngCore;
+    let mut buffer = vec![0u8; size];
+    OsRng.fill_bytes(&mut buffer);
+    buffer
 }
