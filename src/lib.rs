@@ -77,14 +77,6 @@ pub struct Package<T: ?Sized> {
     marker: PhantomData<T>,
 }
 
-impl<T> ToString for Package<T> {
-    fn to_string(&self) -> String {
-        let data_hex = hex::encode(&self.data);
-        let sig_hex = hex::encode(&self.signature);
-        format!("{data_hex}.{sig_hex}")
-    }
-}
-
 impl<T> Package<T>
 where
     T: Serialize + DeserializeOwned + Clone,
@@ -98,6 +90,50 @@ where
             public_key,
             marker: PhantomData,
         }
+    }
+
+    pub fn decode(data: &str) -> Result<Self> {
+        let entry: Vec<_> = data.split('.').collect();
+        let (data, sig, pk) = match (entry.get(0), entry.get(1), entry.get(2)) {
+            (Some(data), None, None) => {
+                if data.is_empty() { return Err(Error::InvalidPackage) }
+                let decoded_data = bs58::decode(data).into_vec()?;
+                (decoded_data, None, None)
+            },
+            (Some(data), Some(sig), None) => {
+                let decoded_data = bs58::decode(data).into_vec()?;
+                let decoded_sig = bs58::decode(sig).into_vec()?;
+                (decoded_data, Some(decoded_sig), None)
+            },
+            (Some(data), Some(sig), Some(pk)) => {
+                let decoded_data = bs58::decode(data).into_vec()?;
+                let decoded_sig = bs58::decode(sig).into_vec()?;
+                let decoded_pk = bs58::decode(pk).into_vec()?;
+                (decoded_data, Some(decoded_sig), Some(decoded_pk))
+            },
+            _ => return Err(Error::InvalidPackage)
+        };
+        Ok(Self::import(data, pk, sig))
+    }
+
+    pub fn encode(&self) -> Result<String> {
+        let data = bs58::encode(&self.data).into_string();
+        let encoded_data = match (self.signature.is_empty(), self.public_key.is_empty()) {
+            (false, false) => {
+                let sig = bs58::encode(&self.signature).into_string();
+                let pk = bs58::encode(&self.public_key).into_string();
+                format!("{data}.{sig}.{pk}")
+            },
+            (false, true) => {
+                let sig = bs58::encode(&self.signature).into_string();
+                format!("{data}.{sig}")
+            },
+            _ => {
+                return Err(Error::InvalidPackage)
+            }
+        };
+
+        Ok(encoded_data)
     }
 }
 

@@ -17,6 +17,8 @@ pub enum Error {
     DecryptionStreamError,
     #[error("Invalid Signature")]
     InvalidSignature,
+    #[error("Invalid Package")]
+    InvalidPackage,
     #[error("Unable to convert slice: {0}")]
     InvalidLength(#[from] TryFromSliceError),
     #[error(transparent)]
@@ -25,4 +27,6 @@ pub enum Error {
     IoError(#[from] io::Error),
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),
+    #[error(transparent)]
+    Bs58DecodeError(#[from] bs58::decode::Error),
 }

@@ -2,6 +2,7 @@
 mod test {
     use crypto_seal::key::PrivateKey;
     use crypto_seal::key::PrivateKeyType;
+    use crypto_seal::Package;
 
     #[test]
     fn default_package() -> anyhow::Result<()> {
@@ -24,6 +25,25 @@ mod test {
         sealed_data.verify()?;
         let unsealed_data = sealed_data.open(&key)?;
         assert_eq!(my_data, unsealed_data);
+        Ok(())
+    }
+
+
+    #[test]
+    fn package_encode_decode() -> anyhow::Result<()> {
+        use crypto_seal::ToSeal;
+        use crypto_seal::{ToOpen, ToVerify};
+        let my_data = String::from("Hello, World!");
+        let (key, sealed_data) = my_data.seal()?;
+        sealed_data.verify()?;
+
+        let encoded_package = sealed_data.encode()?;
+        let decoded_package = Package::<String>::decode(&encoded_package)?;
+
+        decoded_package.verify()?;
+        let unsealed_data = decoded_package.open(&key)?;
+
+        assert_eq!(String::from("Hello, World!"), unsealed_data);
         Ok(())
     }
 
