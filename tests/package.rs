@@ -6,8 +6,8 @@ mod test {
 
     #[test]
     fn default_package() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSeal;
-        use crypto_seal::{ToOpen};
         let my_data = String::from("Hello, World!");
         let (key, sealed_data) = my_data.seal()?;
         let unsealed_data = sealed_data.open(&key)?;
@@ -17,8 +17,8 @@ mod test {
 
     #[test]
     fn default_package_ref() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSealRef;
-        use crypto_seal::{ToOpen};
         let my_data = String::from("Hello, World!");
         let (key, sealed_data) = my_data.seal()?;
         let unsealed_data = sealed_data.open(&key)?;
@@ -26,11 +26,10 @@ mod test {
         Ok(())
     }
 
-
     #[test]
     fn package_encode_decode() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSeal;
-        use crypto_seal::{ToOpen};
         let my_data = String::from("Hello, World!");
         let (key, sealed_data) = my_data.seal()?;
 
@@ -44,9 +43,40 @@ mod test {
     }
 
     #[test]
+    fn multi_package_encode_decode() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealRefWithSharedKey;
+        let alice_pk = PrivateKey::new();
+
+        let random_pk = (0..50)
+            .into_iter()
+            .map(|_| PrivateKey::new())
+            .collect::<Vec<_>>();
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many = message.seal(
+            &alice_pk,
+            random_pk
+                .iter()
+                .filter_map(|p| p.public_key().ok())
+                .collect(),
+        )?;
+
+        let encoded_package = sealed_for_many.encode()?;
+        let decoded_package = Package::<String>::decode(&encoded_package)?;
+
+        for pk in &random_pk {
+            let unsealed = decoded_package.open(pk)?;
+            assert_eq!(String::from("Hello Everyone!"), unsealed);
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn package_with_ec25519_key() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSealWithKey;
-        use crypto_seal::{ToOpen};
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
         let my_data = String::from("Hello, World!");
         let sealed_data = my_data.seal(&private_key)?;
@@ -57,8 +87,8 @@ mod test {
 
     #[test]
     fn package_ref_with_ec25519_key() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSealRefWithKey;
-        use crypto_seal::{ToOpen};
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
         let my_data = String::from("Hello, World!");
         let sealed_data = my_data.seal(&private_key)?;
@@ -69,8 +99,8 @@ mod test {
 
     #[test]
     fn open_with_invalid_ec25519_key() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSealRef;
-        use crypto_seal::{ToOpen};
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
         let my_data = String::from("Hello, World!");
         let (_, sealed_data) = my_data.seal()?;
@@ -80,8 +110,8 @@ mod test {
 
     #[test]
     fn package_with_aes256_key() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
         use crypto_seal::ToSealWithKey;
-        use crypto_seal::{ToOpen};
         let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
         let my_data = String::from("Hello, World!");
         let sealed_data = my_data.seal(&private_key)?;
@@ -92,8 +122,8 @@ mod test {
 
     #[test]
     fn single_shared_package() -> anyhow::Result<()> {
-        use crypto_seal::ToSealWithSharedKey;
         use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealWithSharedKey;
 
         let alice_pk = PrivateKey::new();
         let bob_pk = PrivateKey::new();
@@ -108,14 +138,21 @@ mod test {
 
     #[test]
     fn multiple_shared_package() -> anyhow::Result<()> {
-        use crypto_seal::ToSealRefWithSharedKey;
         use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealRefWithSharedKey;
         let alice_pk = PrivateKey::new();
         let bob_pk = PrivateKey::new();
         let john_pk = PrivateKey::new();
 
         let message = String::from("Hello Everyone!");
-        let sealed_for_many = message.seal(&alice_pk, vec![alice_pk.public_key()?, bob_pk.public_key()?, john_pk.public_key()?])?;
+        let sealed_for_many = message.seal(
+            &alice_pk,
+            vec![
+                alice_pk.public_key()?,
+                bob_pk.public_key()?,
+                john_pk.public_key()?,
+            ],
+        )?;
 
         let unsealed_by_alice = sealed_for_many.open(&alice_pk)?;
         let unsealed_by_bob = sealed_for_many.open(&bob_pk)?;
@@ -123,6 +160,34 @@ mod test {
         assert_eq!(String::from("Hello Everyone!"), unsealed_by_alice);
         assert_eq!(String::from("Hello Everyone!"), unsealed_by_bob);
         assert_eq!(String::from("Hello Everyone!"), unsealed_by_john);
+        Ok(())
+    }
+
+    #[test]
+    fn random_shared_package() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealRefWithSharedKey;
+        let alice_pk = PrivateKey::new();
+
+        let random_pk = (0..50)
+            .into_iter()
+            .map(|_| PrivateKey::new())
+            .collect::<Vec<_>>();
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many = message.seal(
+            &alice_pk,
+            random_pk
+                .iter()
+                .filter_map(|p| p.public_key().ok())
+                .collect(),
+        )?;
+
+        for pk in &random_pk {
+            let unsealed = sealed_for_many.open(pk)?;
+            assert_eq!(String::from("Hello Everyone!"), unsealed);
+        }
+
         Ok(())
     }
 }
