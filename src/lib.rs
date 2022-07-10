@@ -31,21 +31,11 @@ pub trait ToSealRefWithKey {
 }
 
 pub trait ToSealWithSharedKey {
-    /// Consume and encrypt a [`serde::Serialize`] compatible type with a [`PrivateKey`] using the recipient [`PublicKey`] and return a [`Package`]
-    fn seal(self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<Self>>;
-}
-
-pub trait ToSealRefWithSharedKey {
-    /// Borrow and encrypt a [`serde::Serialize`] compatible type with a [`PrivateKey`] using the recipient [`PublicKey`] and return a [`Package`]
-    fn seal(&self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<Self>>;
-}
-
-pub trait ToSealWithMultiSharedKey {
     /// Consume and encrypt a [`serde::Serialize`] compatible type with a [`PrivateKey`] using the multiple [`PublicKey`] and return a [`Package`]
     fn seal(self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<Self>>;
 }
 
-pub trait ToSealRefWithMultiSharedKey {
+pub trait ToSealRefWithSharedKey {
     /// Borrow and encrypt a [`serde::Serialize`] compatible type with a [`PrivateKey`] using the multiple [`PublicKey`] and return a [`Package`]
     fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<Self>>;
 }
@@ -213,36 +203,6 @@ impl<T> ToSealWithSharedKey for T
 where
     T: Serialize + Default,
 {
-    fn seal(self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<T>> {
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
-        package.data = vec![private_key.encrypt(&inner_data, Some(public_key.clone()))?];
-        let sig = private_key.sign(&inner_data)?;
-        package.signature = sig;
-        package.public_key = private_key.public_key()?.to_bytes();
-        Ok(package)
-    }
-}
-
-impl<T> ToSealRefWithSharedKey for T
-where
-    T: Serialize + Default,
-{
-    fn seal(&self, private_key: &PrivateKey, public_key: &PublicKey) -> Result<Package<T>> {
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
-        let sig = private_key.sign(&inner_data)?;
-        package.signature = sig;
-        package.data = vec![private_key.encrypt(&inner_data, Some(public_key.clone()))?];
-        package.public_key = private_key.public_key()?.to_bytes();
-        Ok(package)
-    }
-}
-
-impl<T> ToSealWithMultiSharedKey for T
-where
-    T: Serialize + Default,
-{
     fn seal(self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
@@ -254,7 +214,7 @@ where
     }
 }
 
-impl<T> ToSealRefWithMultiSharedKey for T
+impl<T> ToSealRefWithSharedKey for T
 where
     T: Serialize + Default,
 {

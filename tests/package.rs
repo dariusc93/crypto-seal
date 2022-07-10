@@ -91,7 +91,7 @@ mod test {
     }
 
     #[test]
-    fn shared_package() -> anyhow::Result<()> {
+    fn single_shared_package() -> anyhow::Result<()> {
         use crypto_seal::ToSealWithSharedKey;
         use crypto_seal::ToOpenWithPublicKey;
 
@@ -99,7 +99,7 @@ mod test {
         let bob_pk = PrivateKey::new();
 
         let message_for_bob = String::from("Hello, Bob!");
-        let sealed_for_bob = message_for_bob.seal(&alice_pk, &bob_pk.public_key()?)?;
+        let sealed_for_bob = message_for_bob.seal(&alice_pk, vec![bob_pk.public_key()?])?;
 
         let unsealed_from_alice = sealed_for_bob.open(&bob_pk)?;
         assert_eq!(String::from("Hello, Bob!"), unsealed_from_alice);
@@ -108,7 +108,7 @@ mod test {
 
     #[test]
     fn multiple_shared_package() -> anyhow::Result<()> {
-        use crypto_seal::ToSealRefWithMultiSharedKey;
+        use crypto_seal::ToSealRefWithSharedKey;
         use crypto_seal::ToOpenWithPublicKey;
         let alice_pk = PrivateKey::new();
         let bob_pk = PrivateKey::new();
