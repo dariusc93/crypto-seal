@@ -9,15 +9,13 @@ crypto-seal is a small utility designed to securely "package" or seal serde-comp
 *Note: ED25519 is used by default for encryption and signing. If AES256-GCM is used, signing will only supply an encrypted SHA512 hash using the key. This will be replaced in the future as this may not be a desirable option*
 
 ```rust
-use crypto_seal::{ToOpen, ToSeal, ToVerify, error::Error};
+use crypto_seal::{ToOpen, ToSeal, error::Error};
 
 fn main() -> Result<(), Error> {
 
     let my_data = b"Hello, World!";
 
     let (my_key, sealed_data) = my_data.seal()?;
-
-    sealed_data.verify(&my_key)?;
 
     let unsealed_data = sealed_data.open(&my_key)?;
 

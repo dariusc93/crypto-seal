@@ -70,7 +70,11 @@ impl<T> Package<T>
 where
     T: Serialize + DeserializeOwned + Clone,
 {
-    pub fn import(data: Vec<Vec<u8>>, public_key: Option<Vec<u8>>, signature: Option<Vec<u8>>) -> Self {
+    pub fn import(
+        data: Vec<Vec<u8>>,
+        public_key: Option<Vec<u8>>,
+        signature: Option<Vec<u8>>,
+    ) -> Self {
         let signature = signature.unwrap_or_default();
         let public_key = public_key.unwrap_or_default();
         Self {
@@ -85,44 +89,69 @@ where
         let entry: Vec<_> = data.split('.').collect();
         let (data, sig, pk) = match (entry.get(0), entry.get(1), entry.get(2)) {
             (Some(data), None, None) => {
-                if data.is_empty() { return Err(Error::InvalidPackage) }
-                let step_1_decode = bs58::decode(data).into_vec().map(|s| String::from_utf8_lossy(&s).to_string())?;
-                let decoded_data = step_1_decode.split('/').into_iter().filter_map(|data| bs58::decode(data).into_vec().ok()).collect();
+                if data.is_empty() {
+                    return Err(Error::InvalidPackage);
+                }
+                let step_1_decode = bs58::decode(data)
+                    .into_vec()
+                    .map(|s| String::from_utf8_lossy(&s).to_string())?;
+                let decoded_data = step_1_decode
+                    .split('/')
+                    .into_iter()
+                    .filter_map(|data| bs58::decode(data).into_vec().ok())
+                    .collect();
                 (decoded_data, None, None)
-            },
+            }
             (Some(data), Some(sig), None) => {
-                let step_1_decode = bs58::decode(data).into_vec().map(|s| String::from_utf8_lossy(&s).to_string())?;
-                let decoded_data = step_1_decode.split('/').into_iter().filter_map(|data| bs58::decode(data).into_vec().ok()).collect();
+                let step_1_decode = bs58::decode(data)
+                    .into_vec()
+                    .map(|s| String::from_utf8_lossy(&s).to_string())?;
+                let decoded_data = step_1_decode
+                    .split('/')
+                    .into_iter()
+                    .filter_map(|data| bs58::decode(data).into_vec().ok())
+                    .collect();
                 let decoded_sig = bs58::decode(sig).into_vec()?;
                 (decoded_data, Some(decoded_sig), None)
-            },
+            }
             (Some(data), Some(sig), Some(pk)) => {
-                let step_1_decode = bs58::decode(data).into_vec().map(|s| String::from_utf8_lossy(&s).to_string())?;
-                let decoded_data = step_1_decode.split('/').into_iter().filter_map(|data| bs58::decode(data).into_vec().ok()).collect();
+                let step_1_decode = bs58::decode(data)
+                    .into_vec()
+                    .map(|s| String::from_utf8_lossy(&s).to_string())?;
+                let decoded_data = step_1_decode
+                    .split('/')
+                    .into_iter()
+                    .filter_map(|data| bs58::decode(data).into_vec().ok())
+                    .collect();
                 let decoded_sig = bs58::decode(sig).into_vec()?;
                 let decoded_pk = bs58::decode(pk).into_vec()?;
                 (decoded_data, Some(decoded_sig), Some(decoded_pk))
-            },
-            _ => return Err(Error::InvalidPackage)
+            }
+            _ => return Err(Error::InvalidPackage),
         };
         Ok(Self::import(data, pk, sig))
     }
 
     pub fn encode(&self) -> Result<String> {
-        let data = bs58::encode(self.data.iter().map(|data| bs58::encode(data).into_string()).collect::<Vec<_>>().join("/")).into_string();
+        let data = bs58::encode(
+            self.data
+                .iter()
+                .map(|data| bs58::encode(data).into_string())
+                .collect::<Vec<_>>()
+                .join("/"),
+        )
+        .into_string();
         let encoded_data = match (self.signature.is_empty(), self.public_key.is_empty()) {
             (false, false) => {
                 let sig = bs58::encode(&self.signature).into_string();
                 let pk = bs58::encode(&self.public_key).into_string();
                 format!("{data}.{sig}.{pk}")
-            },
+            }
             (false, true) => {
                 let sig = bs58::encode(&self.signature).into_string();
                 format!("{data}.{sig}")
-            },
-            _ => {
-                return Err(Error::InvalidPackage)
             }
+            _ => return Err(Error::InvalidPackage),
         };
 
         Ok(encoded_data)
@@ -137,9 +166,8 @@ where
         let private_key = PrivateKey::new();
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
+        package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
-        let sig = private_key.sign(&inner_data)?;
-        package.signature = sig;
         if let Ok(public_key) = private_key.public_key() {
             package.public_key = public_key.to_bytes();
         }
@@ -155,9 +183,8 @@ where
         let private_key = PrivateKey::new();
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
+        package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
-        let sig = private_key.sign(&inner_data)?;
-        package.signature = sig;
         if let Ok(public_key) = private_key.public_key() {
             package.public_key = public_key.to_bytes();
         }
@@ -172,9 +199,8 @@ where
     fn seal(self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
+        package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
-        let sig = private_key.sign(&inner_data)?;
-        package.signature = sig;
         if let Ok(public_key) = private_key.public_key() {
             package.public_key = public_key.to_bytes();
         }
@@ -189,9 +215,8 @@ where
     fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
+        package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
-        let sig = private_key.sign(&inner_data)?;
-        package.signature = sig;
         if let Ok(public_key) = private_key.public_key() {
             package.public_key = public_key.to_bytes();
         }
@@ -208,7 +233,14 @@ where
         let inner_data = serde_json::to_vec(&self)?;
         let sig = private_key.sign(&inner_data)?;
         package.signature = sig;
-        package.data = public_key.iter().filter_map(|public_key| private_key.encrypt(&inner_data, Some(public_key.clone())).ok()).collect::<Vec<_>>();
+        package.data = public_key
+            .iter()
+            .filter_map(|public_key| {
+                private_key
+                    .encrypt(&inner_data, Some(public_key.clone()))
+                    .ok()
+            })
+            .collect::<Vec<_>>();
         package.public_key = private_key.public_key()?.to_bytes();
         Ok(package)
     }
@@ -223,7 +255,14 @@ where
         let inner_data = serde_json::to_vec(&self)?;
         let sig = private_key.sign(&inner_data)?;
         package.signature = sig;
-        package.data = public_key.iter().filter_map(|public_key| private_key.encrypt(&inner_data, Some(public_key.clone())).ok()).collect::<Vec<_>>();
+        package.data = public_key
+            .iter()
+            .filter_map(|public_key| {
+                private_key
+                    .encrypt(&inner_data, Some(public_key.clone()))
+                    .ok()
+            })
+            .collect::<Vec<_>>();
         package.public_key = private_key.public_key()?.to_bytes();
         Ok(package)
     }
@@ -250,10 +289,10 @@ where
         for data in &self.data {
             if let Ok(data) = key.decrypt(data, Some(pk.clone())) {
                 pk.verify(&data, &self.signature)?;
-                return serde_json::from_slice(&data).map_err(Error::from)
+                return serde_json::from_slice(&data).map_err(Error::from);
             }
         }
-        return Err(Error::DecryptionError)
+        return Err(Error::DecryptionError);
     }
 }
 
@@ -269,10 +308,10 @@ where
                 if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
                     let pk = PublicKey::from_bytes(&self.public_key)?;
                     pk.verify(&data, &self.signature)?;
-                    return serde_json::from_slice(&data).map_err(Error::from)
+                    return serde_json::from_slice(&data).map_err(Error::from);
                 }
             }
         }
-        return Err(Error::DecryptionError)
+        return Err(Error::DecryptionError);
     }
 }

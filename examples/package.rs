@@ -1,12 +1,9 @@
-use crypto_seal::{ToOpen, ToSeal, ToVerify, error::Error};
+use crypto_seal::{error::Error, ToOpen, ToSeal};
 
 fn main() -> Result<(), Error> {
-
     let my_data = b"Hello, World!";
 
     let (my_key, sealed_data) = my_data.seal()?;
-
-    sealed_data.verify()?;
 
     let unsealed_data = sealed_data.open(&my_key)?;
 
