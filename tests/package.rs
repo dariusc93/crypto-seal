@@ -93,7 +93,7 @@ mod test {
     #[test]
     fn shared_package() -> anyhow::Result<()> {
         use crypto_seal::ToSealWithSharedKey;
-        use crypto_seal::ToOpenWithSharedKey;
+        use crypto_seal::ToOpenWithPublicKey;
 
         let alice_pk = PrivateKey::new();
         let bob_pk = PrivateKey::new();
@@ -101,8 +101,28 @@ mod test {
         let message_for_bob = String::from("Hello, Bob!");
         let sealed_for_bob = message_for_bob.seal(&alice_pk, &bob_pk.public_key()?)?;
 
-        let unsealed_from_alice = sealed_for_bob.open(&bob_pk, &alice_pk.public_key()?)?;
+        let unsealed_from_alice = sealed_for_bob.open(&bob_pk)?;
         assert_eq!(String::from("Hello, Bob!"), unsealed_from_alice);
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_shared_package() -> anyhow::Result<()> {
+        use crypto_seal::ToSealRefWithMultiSharedKey;
+        use crypto_seal::ToOpenWithPublicKey;
+        let alice_pk = PrivateKey::new();
+        let bob_pk = PrivateKey::new();
+        let john_pk = PrivateKey::new();
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many = message.seal(&alice_pk, vec![alice_pk.public_key()?, bob_pk.public_key()?, john_pk.public_key()?])?;
+
+        let unsealed_by_alice = sealed_for_many.open(&alice_pk)?;
+        let unsealed_by_bob = sealed_for_many.open(&bob_pk)?;
+        let unsealed_by_john = sealed_for_many.open(&john_pk)?;
+        assert_eq!(String::from("Hello Everyone!"), unsealed_by_alice);
+        assert_eq!(String::from("Hello Everyone!"), unsealed_by_bob);
+        assert_eq!(String::from("Hello Everyone!"), unsealed_by_john);
         Ok(())
     }
 }

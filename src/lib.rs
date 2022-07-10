@@ -55,6 +55,11 @@ pub trait ToOpen<T> {
     fn open(&self, key: &PrivateKey) -> Result<T>;
 }
 
+pub trait ToOpenWithPublicKey<T> {
+    /// Decrypts [`Package`] using [`PrivateKey`] and internal [`PublicKey`] and returns defined type
+    fn open(&self, key: &PrivateKey) -> Result<T>;
+}
+
 pub trait ToOpenWithSharedKey<T> {
     /// Decrypts [`Package`] using [`PrivateKey`] using the recipient [`PublicKey`] and returns defined type
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T>;
@@ -234,6 +239,36 @@ where
     }
 }
 
+impl<T> ToSealWithMultiSharedKey for T
+where
+    T: Serialize + Default,
+{
+    fn seal(self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
+        let mut package = Package::default();
+        let inner_data = serde_json::to_vec(&self)?;
+        let sig = private_key.sign(&inner_data)?;
+        package.signature = sig;
+        package.data = public_key.iter().filter_map(|public_key| private_key.encrypt(&inner_data, Some(public_key.clone())).ok()).collect::<Vec<_>>();
+        package.public_key = private_key.public_key()?.to_bytes();
+        Ok(package)
+    }
+}
+
+impl<T> ToSealRefWithMultiSharedKey for T
+where
+    T: Serialize + Default,
+{
+    fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
+        let mut package = Package::default();
+        let inner_data = serde_json::to_vec(&self)?;
+        let sig = private_key.sign(&inner_data)?;
+        package.signature = sig;
+        package.data = public_key.iter().filter_map(|public_key| private_key.encrypt(&inner_data, Some(public_key.clone())).ok()).collect::<Vec<_>>();
+        package.public_key = private_key.public_key()?.to_bytes();
+        Ok(package)
+    }
+}
+
 impl<T> ToOpen<T> for Package<T>
 where
     T: DeserializeOwned,
@@ -246,16 +281,36 @@ where
     }
 }
 
+impl<T> ToOpenWithPublicKey<T> for Package<T>
+where
+    T: DeserializeOwned,
+{
+    fn open(&self, key: &PrivateKey) -> Result<T> {
+        let pk = PublicKey::from_bytes(&self.public_key)?;
+        for data in &self.data {
+            if let Ok(data) = key.decrypt(data, Some(pk.clone())) {
+                pk.verify(&data, &self.signature)?;
+                return serde_json::from_slice(&data).map_err(Error::from)
+            }
+        }
+        return Err(Error::DecryptionError)
+    }
+}
+
 impl<T> ToOpenWithSharedKey<T> for Package<T>
 where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
-        for data in &self.data {
-            if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
-                let pk = PublicKey::from_bytes(&self.public_key)?;
-                pk.verify(&data, &self.signature)?;
-                return serde_json::from_slice(&data).map_err(Error::from)
+        // Since this should be used in the event the public_key field is empty, we will make it so it will return an error if it exist
+        // TODO: return specific/correct error
+        if self.public_key.is_empty() {
+            for data in &self.data {
+                if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
+                    let pk = PublicKey::from_bytes(&self.public_key)?;
+                    pk.verify(&data, &self.signature)?;
+                    return serde_json::from_slice(&data).map_err(Error::from)
+                }
             }
         }
         return Err(Error::DecryptionError)
