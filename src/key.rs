@@ -61,12 +61,33 @@ pub enum PublicKey {
     Secp256k1(secp256k1::PublicKey)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PublicKeyType {
     /// Ed25519 Public Key
     Ed25519,
 
     /// Secp256k1 Public Key
     Secp256k1
+}
+
+impl TryFrom<u8> for PublicKeyType {
+    type Error = Error;
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        match value {
+            b'e' => Ok(PublicKeyType::Ed25519),
+            b's' => Ok(PublicKeyType::Secp256k1),
+            _ => Err(Error::InvalidPublickey)
+        }
+    }
+}
+
+impl From<PublicKeyType> for u8 {
+    fn from(value: PublicKeyType) -> Self {
+        match value {
+            PublicKeyType::Ed25519 => b'e',
+            PublicKeyType::Secp256k1 => b's',
+        }
+    }
 }
 
 impl From<ed25519_dalek::PublicKey> for PublicKey {
@@ -179,6 +200,21 @@ impl PublicKey {
     pub fn from_secp256k1_bytes(bytes: &[u8]) -> Result<PublicKey> {
         let public_key = secp256k1::PublicKey::from_slice(bytes)?;
         Ok(PublicKey::Secp256k1(public_key))
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<PublicKey> {
+
+        if bytes.len() == 0 { return Err(Error::InvalidPublickey) } 
+
+        let mut encoded_key = bytes.to_vec();
+        let ktype = encoded_key.remove(0).try_into()?;
+        Self::from_bytes(ktype, &encoded_key)
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut data = vec![self.key_type().into()];
+        data.extend(self.to_bytes());
+        data
     }
 
     /// Convert the [`PublicKey`] to a byte array

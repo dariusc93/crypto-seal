@@ -169,7 +169,7 @@ where
         package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
         if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.to_bytes();
+            package.public_key = public_key.encode();
         }
         Ok((private_key, package))
     }
@@ -186,7 +186,7 @@ where
         package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
         if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.to_bytes();
+            package.public_key = public_key.encode();
         }
         Ok((private_key, package))
     }
@@ -202,7 +202,7 @@ where
         package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
         if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.to_bytes();
+            package.public_key = public_key.encode();
         }
         Ok(package)
     }
@@ -218,7 +218,7 @@ where
         package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
         if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.to_bytes();
+            package.public_key = public_key.encode();
         }
         Ok(package)
     }
@@ -232,16 +232,18 @@ where
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
         let sig = private_key.sign(&inner_data)?;
+        let ptype = private_key.public_key()?.key_type();
         package.signature = sig;
         package.data = public_key
             .iter()
+            .filter(|public_key| public_key.key_type() == ptype)
             .filter_map(|public_key| {
                 private_key
                     .encrypt(&inner_data, Some(public_key.clone()))
                     .ok()
             })
             .collect::<Vec<_>>();
-        package.public_key = private_key.public_key()?.to_bytes();
+        package.public_key = private_key.public_key()?.encode();
         Ok(package)
     }
 }
@@ -254,16 +256,18 @@ where
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(&self)?;
         let sig = private_key.sign(&inner_data)?;
+        let ptype = private_key.public_key()?.key_type();
         package.signature = sig;
         package.data = public_key
             .iter()
+            .filter(|public_key| public_key.key_type() == ptype)
             .filter_map(|public_key| {
                 private_key
                     .encrypt(&inner_data, Some(public_key.clone()))
                     .ok()
             })
             .collect::<Vec<_>>();
-        package.public_key = private_key.public_key()?.to_bytes();
+        package.public_key = private_key.public_key()?.encode();
         Ok(package)
     }
 }
@@ -285,7 +289,7 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        let pk = PublicKey::from_bytes(key.public_key()?.key_type(), &self.public_key)?;
+        let pk = PublicKey::decode(&self.public_key)?;
         for data in &self.data {
             if let Ok(data) = key.decrypt(data, Some(pk.clone())) {
                 pk.verify(&data, &self.signature)?;
@@ -303,10 +307,11 @@ where
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
         // Since this should be used in the event the public_key field is empty, we will make it so it will return an error if it exist
         // TODO: return specific/correct error
+        if key.public_key()?.key_type() != public_key.key_type() { return Err(Error::InvalidPublickey) }
         if self.public_key.is_empty() {
             for data in &self.data {
                 if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
-                    let pk = PublicKey::from_bytes(key.public_key()?.key_type(), &self.public_key)?;
+                    let pk = PublicKey::decode(&self.public_key)?;
                     pk.verify(&data, &self.signature)?;
                     return serde_json::from_slice(&data).map_err(Error::from);
                 }
