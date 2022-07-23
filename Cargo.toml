@@ -20,9 +20,11 @@ exclude = [ ".gitignore" ]
 x25519-dalek = "1"
 ed25519-dalek = "1"
 curve25519-dalek = "3.2"
-sha2   = "0.10"
+secp256k1 = { version = "0.24", features = ["rand-std"] }
+sha2   = "0.9"
 hmac = "0.12"
 aes-gcm = { version = "0.9", features = ["stream"] }
+digest = "0.9"
 anyhow = "1"
 thiserror = "1"
 zeroize = "1"

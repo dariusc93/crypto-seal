@@ -285,7 +285,7 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        let pk = PublicKey::from_bytes(&self.public_key)?;
+        let pk = PublicKey::from_bytes(key.public_key()?.key_type(), &self.public_key)?;
         for data in &self.data {
             if let Ok(data) = key.decrypt(data, Some(pk.clone())) {
                 pk.verify(&data, &self.signature)?;
@@ -306,7 +306,7 @@ where
         if self.public_key.is_empty() {
             for data in &self.data {
                 if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
-                    let pk = PublicKey::from_bytes(&self.public_key)?;
+                    let pk = PublicKey::from_bytes(key.public_key()?.key_type(), &self.public_key)?;
                     pk.verify(&data, &self.signature)?;
                     return serde_json::from_slice(&data).map_err(Error::from);
                 }

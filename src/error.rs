@@ -19,10 +19,14 @@ pub enum Error {
     InvalidSignature,
     #[error("Invalid Package")]
     InvalidPackage,
+    #[error("Invalid public key")]
+    InvalidPublickey,
     #[error("Unable to convert slice: {0}")]
     InvalidLength(#[from] TryFromSliceError),
     #[error(transparent)]
     SignatureError(#[from] SignatureError),
+    #[error(transparent)]
+    Secp256k1Error(#[from] secp256k1::Error),
     #[error(transparent)]
     IoError(#[from] io::Error),
     #[error(transparent)]

@@ -98,6 +98,30 @@ mod test {
     }
 
     #[test]
+    fn package_with_secp256k1_key() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
+        use crypto_seal::ToSealWithKey;
+        let private_key = PrivateKey::new_with(PrivateKeyType::Secp256k1);
+        let my_data = String::from("Hello, World!");
+        let sealed_data = my_data.seal(&private_key)?;
+        let unsealed_data = sealed_data.open(&private_key)?;
+        assert_eq!(String::from("Hello, World!"), unsealed_data);
+        Ok(())
+    }
+
+    #[test]
+    fn package_ref_with_secp256k1_key() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
+        use crypto_seal::ToSealRefWithKey;
+        let private_key = PrivateKey::new_with(PrivateKeyType::Secp256k1);
+        let my_data = String::from("Hello, World!");
+        let sealed_data = my_data.seal(&private_key)?;
+        let unsealed_data = sealed_data.open(&private_key)?;
+        assert_eq!(my_data, unsealed_data);
+        Ok(())
+    }
+
+    #[test]
     fn open_with_invalid_ec25519_key() -> anyhow::Result<()> {
         use crypto_seal::ToOpen;
         use crypto_seal::ToSealRef;
@@ -172,6 +196,62 @@ mod test {
         let random_pk = (0..50)
             .into_iter()
             .map(|_| PrivateKey::new())
+            .collect::<Vec<_>>();
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many = message.seal(
+            &alice_pk,
+            random_pk
+                .iter()
+                .filter_map(|p| p.public_key().ok())
+                .collect(),
+        )?;
+
+        for pk in &random_pk {
+            let unsealed = sealed_for_many.open(pk)?;
+            assert_eq!(String::from("Hello Everyone!"), unsealed);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_shared_package_secp256k1() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealRefWithSharedKey;
+        let alice_pk = PrivateKey::new_with(PrivateKeyType::Secp256k1);
+        let bob_pk = PrivateKey::new_with(PrivateKeyType::Secp256k1);
+        let john_pk = PrivateKey::new_with(PrivateKeyType::Secp256k1);
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many = message.seal(
+            &alice_pk,
+            vec![
+                alice_pk.public_key()?,
+                bob_pk.public_key()?,
+                john_pk.public_key()?,
+            ],
+        )?;
+
+        let unsealed_by_alice = sealed_for_many.open(&alice_pk)?;
+        let unsealed_by_bob = sealed_for_many.open(&bob_pk)?;
+        let unsealed_by_john = sealed_for_many.open(&john_pk)?;
+        assert_eq!(String::from("Hello Everyone!"), unsealed_by_alice);
+        assert_eq!(String::from("Hello Everyone!"), unsealed_by_bob);
+        assert_eq!(String::from("Hello Everyone!"), unsealed_by_john);
+        Ok(())
+    }
+
+    #[test]
+    fn random_shared_package_with_secp256k1() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealRefWithSharedKey;
+
+        let alice_pk = PrivateKey::new_with(PrivateKeyType::Secp256k1);
+
+        let random_pk = (0..50)
+            .into_iter()
+            .map(|_| PrivateKey::new_with(PrivateKeyType::Secp256k1))
             .collect::<Vec<_>>();
 
         let message = String::from("Hello Everyone!");
