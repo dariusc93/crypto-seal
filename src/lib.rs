@@ -296,7 +296,7 @@ where
                 return serde_json::from_slice(&data).map_err(Error::from);
             }
         }
-        return Err(Error::DecryptionError);
+        Err(Error::DecryptionError)
     }
 }
 
@@ -307,7 +307,9 @@ where
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
         // Since this should be used in the event the public_key field is empty, we will make it so it will return an error if it exist
         // TODO: return specific/correct error
-        if key.public_key()?.key_type() != public_key.key_type() { return Err(Error::InvalidPublickey) }
+        if key.public_key()?.key_type() != public_key.key_type() {
+            return Err(Error::InvalidPublickey);
+        }
         if self.public_key.is_empty() {
             for data in &self.data {
                 if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
@@ -317,6 +319,6 @@ where
                 }
             }
         }
-        return Err(Error::DecryptionError);
+        Err(Error::DecryptionError)
     }
 }
