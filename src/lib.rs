@@ -86,75 +86,14 @@ where
     }
 
     pub fn decode(data: &str) -> Result<Self> {
-        let entry: Vec<_> = data.split('.').collect();
-        let (data, sig, pk) = match (entry.get(0), entry.get(1), entry.get(2)) {
-            (Some(data), None, None) => {
-                if data.is_empty() {
-                    return Err(Error::InvalidPackage);
-                }
-                let step_1_decode = bs58::decode(data)
-                    .into_vec()
-                    .map(|s| String::from_utf8_lossy(&s).to_string())?;
-                let decoded_data = step_1_decode
-                    .split('/')
-                    .into_iter()
-                    .filter_map(|data| bs58::decode(data).into_vec().ok())
-                    .collect();
-                (decoded_data, None, None)
-            }
-            (Some(data), Some(sig), None) => {
-                let step_1_decode = bs58::decode(data)
-                    .into_vec()
-                    .map(|s| String::from_utf8_lossy(&s).to_string())?;
-                let decoded_data = step_1_decode
-                    .split('/')
-                    .into_iter()
-                    .filter_map(|data| bs58::decode(data).into_vec().ok())
-                    .collect();
-                let decoded_sig = bs58::decode(sig).into_vec()?;
-                (decoded_data, Some(decoded_sig), None)
-            }
-            (Some(data), Some(sig), Some(pk)) => {
-                let step_1_decode = bs58::decode(data)
-                    .into_vec()
-                    .map(|s| String::from_utf8_lossy(&s).to_string())?;
-                let decoded_data = step_1_decode
-                    .split('/')
-                    .into_iter()
-                    .filter_map(|data| bs58::decode(data).into_vec().ok())
-                    .collect();
-                let decoded_sig = bs58::decode(sig).into_vec()?;
-                let decoded_pk = bs58::decode(pk).into_vec()?;
-                (decoded_data, Some(decoded_sig), Some(decoded_pk))
-            }
-            _ => return Err(Error::InvalidPackage),
-        };
-        Ok(Self::import(data, pk, sig))
+        let bytes = base64::decode(data)?;
+        let package: Package<T> = bincode::deserialize(&bytes)?;
+        Ok(package)
     }
 
     pub fn encode(&self) -> Result<String> {
-        let data = bs58::encode(
-            self.data
-                .iter()
-                .map(|data| bs58::encode(data).into_string())
-                .collect::<Vec<_>>()
-                .join("/"),
-        )
-        .into_string();
-        let encoded_data = match (self.signature.is_empty(), self.public_key.is_empty()) {
-            (false, false) => {
-                let sig = bs58::encode(&self.signature).into_string();
-                let pk = bs58::encode(&self.public_key).into_string();
-                format!("{data}.{sig}.{pk}")
-            }
-            (false, true) => {
-                let sig = bs58::encode(&self.signature).into_string();
-                format!("{data}.{sig}")
-            }
-            _ => return Err(Error::InvalidPackage),
-        };
-
-        Ok(encoded_data)
+        let bytes = bincode::serialize(&self)?;
+        Ok(base64::encode(bytes))
     }
 }
 

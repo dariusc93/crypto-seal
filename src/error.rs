@@ -34,5 +34,5 @@ pub enum Error {
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),
     #[error(transparent)]
-    Bs58DecodeError(#[from] bs58::decode::Error),
+    Base64DecodeError(#[from] base64::DecodeError),
 }
