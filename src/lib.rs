@@ -102,15 +102,7 @@ where
     T: Serialize + Default,
 {
     fn seal(self) -> Result<(PrivateKey, Package<T>)> {
-        let private_key = PrivateKey::new();
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
-        package.signature = private_key.sign(&inner_data)?;
-        package.data = vec![private_key.encrypt(&inner_data, None)?];
-        if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.encode();
-        }
-        Ok((private_key, package))
+        ToSealRef::seal(&self)
     }
 }
 
@@ -136,14 +128,7 @@ where
     T: Serialize + Default,
 {
     fn seal(self, private_key: &PrivateKey) -> Result<Package<T>> {
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
-        package.signature = private_key.sign(&inner_data)?;
-        package.data = vec![private_key.encrypt(&inner_data, None)?];
-        if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.encode();
-        }
-        Ok(package)
+        ToSealRefWithKey::seal(&self, private_key)
     }
 }
 
@@ -168,22 +153,7 @@ where
     T: Serialize + Default,
 {
     fn seal(self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
-        let sig = private_key.sign(&inner_data)?;
-        let ptype = private_key.public_key()?.key_type();
-        package.signature = sig;
-        package.data = public_key
-            .iter()
-            .filter(|public_key| public_key.key_type() == ptype)
-            .filter_map(|public_key| {
-                private_key
-                    .encrypt(&inner_data, Some(public_key.clone()))
-                    .ok()
-            })
-            .collect::<Vec<_>>();
-        package.public_key = private_key.public_key()?.encode();
-        Ok(package)
+        ToSealRefWithSharedKey::seal(&self, private_key, public_key)
     }
 }
 

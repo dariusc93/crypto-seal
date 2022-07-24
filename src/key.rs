@@ -452,12 +452,7 @@ impl PrivateKey {
                 }
                 Err(Error::InvalidSignature)
             }
-            PrivateKey::Ed25519(key) => {
-                let signature = Signature::from_bytes(signature)?;
-                key.verify(data, &signature)?;
-                Ok(())
-            }
-            PrivateKey::Secp256k1(_) => {
+            _ => {
                 let public_key = self.public_key()?;
                 public_key.verify(data, signature)
             }
@@ -485,14 +480,7 @@ impl PrivateKey {
                 }
                 Err(Error::InvalidSignature)
             }
-            PrivateKey::Ed25519(key) => {
-                let mut hasher = Sha512::new();
-                io::copy(reader, &mut hasher)?;
-                let signature = Signature::from_bytes(signature)?;
-                key.verify_prehashed(hasher, context, &signature)?;
-                Ok(())
-            }
-            PrivateKey::Secp256k1(_) => {
+            _ => {
                 let public_key = self.public_key()?;
                 public_key.verify_reader(reader, signature, context)
             }
