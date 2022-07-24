@@ -375,8 +375,7 @@ impl PrivateKey {
     }
 
     /// Sign the data provided using [`PrivateKey`]
-    /// Note: If a symmetric key is used, it will encrypt the hash.
-    ///       This will change in the future to use HMAC instead
+    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
     pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
         match self {
@@ -403,8 +402,7 @@ impl PrivateKey {
     }
 
     /// Sign the data from [`std::io::Read`] using [`PrivateKey`]
-    /// Note: If a symmetric key is used, it will encrypt the hash.
-    ///       This will change in the future to use HMAC instead
+    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
     pub fn sign_reader(
         &self,
@@ -437,8 +435,7 @@ impl PrivateKey {
     }
 
     /// Verify the signature of the data provided using [`PrivateKey`]
-    /// Note: If a symmetric key is used, it will decrypt the hash.
-    ///       This will change in the future to use HMAC instead
+    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         match self {
@@ -460,8 +457,7 @@ impl PrivateKey {
     }
 
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
-    /// Note: If a symmetric key is used, it will decrypt the hash.
-    ///       This will change in the future to use HMAC instead
+    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
     pub fn verify_reader(
         &self,
@@ -490,10 +486,7 @@ impl PrivateKey {
 
 impl PrivateKey {
     /// Encrypt the data using [`PrivateKey`].
-    ///
-    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
-    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
-    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact encryption
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn encrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
         let raw_nonce = generate(12);
@@ -508,10 +501,7 @@ impl PrivateKey {
     }
 
     /// Decrypt the data using [`PrivateKey`].
-    ///
-    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
-    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
-    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact decryption
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn decrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
         let (nonce, data) = extract_data_slice(data, 12);
@@ -526,10 +516,7 @@ impl PrivateKey {
 
 impl PrivateKey {
     /// Encrypt the data stream from [`std::io::Read`] to [`std::io::Write`] using [`PrivateKey`].
-    ///
-    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
-    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
-    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact encryption
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn encrypt_stream(
         &self,
         reader: &mut impl io::Read,
@@ -567,10 +554,7 @@ impl PrivateKey {
     }
 
     /// Decrypt the data stream from [`std::io::Read`] to [`std::io::Write`] using [`PrivateKey`].
-    ///
-    /// If `pubkey` is supplied while [`PrivateKeyType::Ed25519`], a key exchange will be performed
-    /// If `pubkey` is not supplied while [`PrivateKeyType::Ed25519`], a key will be produced between our private and public key
-    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` not impact decryption
+    /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn decrypt_stream(
         &self,
         reader: &mut impl io::Read,
@@ -612,12 +596,6 @@ impl PrivateKey {
     }
 
     /// Used internally to obtain the encryption key
-    /// If the key type is [`PrivateKeyType::Aes256`], it will use the key directly from [`PrivateKey::Aes256`],
-    /// If the key type is [`PrivateKeyType::Ed25519`],it will convert our private key to [`x25519_dalek::StaticSecret`]
-    /// and perform a check on the pubkey input to determine if its [`Option::is_some`]. If true it will perform a key exchange between our
-    /// [`x25519_dalek::StaticSecret`] and the supplied [`PublicKey`], which is converted to [`x25519_dalek::PublicKey`]. If false,
-    /// we perform a key exchange with our own [`x25519_dalek::PublicKey`] derived from generated [`x25519_dalek::StaticSecret`]
-    /// and return the key.
     fn fetch_encryption_key(&self, pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(key) => Ok(key.to_vec()),
