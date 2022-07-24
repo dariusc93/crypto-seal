@@ -26,6 +26,8 @@ pub enum Error {
     #[error(transparent)]
     SignatureError(#[from] SignatureError),
     #[error(transparent)]
+    BincodeError(#[from] bincode::Error),
+    #[error(transparent)]
     Secp256k1Error(#[from] secp256k1::Error),
     #[error(transparent)]
     IoError(#[from] io::Error),
