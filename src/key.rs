@@ -7,8 +7,9 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use curve25519_dalek::edwards::CompressedEdwardsY;
-use ed25519_dalek::{Digest, Keypair, Sha512, Signature, Signer, Verifier};
+use ed25519_dalek::{Digest, Sha512, Signature, Signer, Verifier};
 use rand::rngs::OsRng;
+use serde::{Serialize, Deserialize, Deserializer};
 use std::io;
 use zeroize::Zeroize;
 
@@ -19,7 +20,7 @@ use zeroize::Zeroize;
 /// - [`aes_gcm::Aes256Gcm`]
 #[derive(Debug)]
 pub enum PrivateKey {
-    Ed25519(Keypair),
+    Ed25519(ed25519_dalek::Keypair),
     Secp256k1(secp256k1::SecretKey),
     Aes256([u8; 32]),
 }
@@ -55,11 +56,32 @@ impl Drop for PrivateKey {
 /// Container of public keys
 /// The following is supported
 /// - [`ed25519_dalek::PublicKey`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::PublicKey),
     Secp256k1(secp256k1::PublicKey),
 }
+
+impl Serialize for PublicKey {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        let pk_str = bs58::encode(self.encode()).into_string();
+        serializer.serialize_str(&pk_str)
+    }
+}
+
+impl<'d> Deserialize<'d> for PublicKey {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'d>,
+    {
+        let pk_str = <String>::deserialize(deserializer)?;
+        let bytes = bs58::decode(pk_str).into_vec().map_err(serde::de::Error::custom)?;
+        PublicKey::decode(&bytes).map_err(serde::de::Error::custom)
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PublicKeyType {
@@ -74,8 +96,8 @@ impl TryFrom<u8> for PublicKeyType {
     type Error = Error;
     fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
         match value {
-            b'e' => Ok(PublicKeyType::Ed25519),
-            b's' => Ok(PublicKeyType::Secp256k1),
+            0xa1 => Ok(PublicKeyType::Ed25519),
+            0xb1 => Ok(PublicKeyType::Secp256k1),
             _ => Err(Error::InvalidPublickey),
         }
     }
@@ -84,8 +106,8 @@ impl TryFrom<u8> for PublicKeyType {
 impl From<PublicKeyType> for u8 {
     fn from(value: PublicKeyType) -> Self {
         match value {
-            PublicKeyType::Ed25519 => b'e',
-            PublicKeyType::Secp256k1 => b's',
+            PublicKeyType::Ed25519 => 0xa1,
+            PublicKeyType::Secp256k1 => 0xb1,
         }
     }
 }
@@ -137,19 +159,7 @@ impl TryFrom<PrivateKey> for x25519_dalek::StaticSecret {
     type Error = Error;
 
     fn try_from(value: PrivateKey) -> std::result::Result<Self, Self::Error> {
-        match &value {
-            PrivateKey::Ed25519(kp) => {
-                let mut hasher: Sha512 = Sha512::new();
-                hasher.update(kp.secret.as_ref());
-                let hash = hasher.finalize().to_vec();
-                let mut new_sk: [u8; 32] = [0; 32];
-                new_sk.copy_from_slice(&hash[..32]);
-                let sk = x25519_dalek::StaticSecret::from(new_sk);
-                new_sk.zeroize();
-                Ok(sk)
-            }
-            _ => Err(Error::Unsupported),
-        }
+        TryFrom::try_from(&value)
     }
 }
 
@@ -308,6 +318,28 @@ impl Default for PrivateKeyType {
 const WRITE_BUFFER_SIZE: usize = 512;
 const READ_BUFFER_SIZE: usize = 528;
 
+impl TryFrom<u8> for PrivateKeyType {
+    type Error = Error;
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        match value {
+            0xa1 => Ok(PrivateKeyType::Ed25519),
+            0xb1 => Ok(PrivateKeyType::Secp256k1),
+            0xc1 => Ok(PrivateKeyType::Aes256),
+            _ => Err(Error::InvalidPublickey),
+        }
+    }
+}
+
+impl From<PrivateKeyType> for u8 {
+    fn from(value: PrivateKeyType) -> Self {
+        match value {
+            PrivateKeyType::Ed25519 => 0xa1,
+            PrivateKeyType::Secp256k1 => 0xb1,
+            PrivateKeyType::Aes256 => 0xc1,
+        }
+    }
+}
+
 impl PrivateKey {
     /// Generates a new [`PrivateKey`] with randomly generated key
     pub fn new() -> Self {
@@ -319,7 +351,7 @@ impl PrivateKey {
         match key_type {
             PrivateKeyType::Ed25519 => {
                 let mut csprng = OsRng {};
-                let key = Keypair::generate(&mut csprng);
+                let key = ed25519_dalek::Keypair::generate(&mut csprng);
                 PrivateKey::Ed25519(key)
             }
             PrivateKeyType::Aes256 => {
@@ -336,8 +368,9 @@ impl PrivateKey {
 
     /// Import private key which is identified with [`PrivateKeyType`]
     pub fn import(key_type: PrivateKeyType, key: Vec<u8>) -> Result<Self> {
+        let key = zeroize::Zeroizing::new(key);
         match key_type {
-            PrivateKeyType::Ed25519 => Keypair::from_bytes(&key)
+            PrivateKeyType::Ed25519 => ed25519_dalek::Keypair::from_bytes(&key)
                 .map(PrivateKey::Ed25519)
                 .map_err(Error::from),
             PrivateKeyType::Aes256 => key
@@ -349,6 +382,32 @@ impl PrivateKey {
                 .map(PrivateKey::Secp256k1)
                 .map_err(Error::from),
         }
+    }
+
+    /// Imports a private key with a identifier to identify if its [`PrivateKey::Ed25519`], [`PrivateKey::Secp256k1`], or [`PrivateKey::Aes256`]
+    pub fn decode(bytes: &[u8]) -> Result<PrivateKey> {
+        if bytes.is_empty() {
+            return Err(Error::InvalidPrivatekey);
+        }
+        let mut encoded_key = bytes.to_vec();
+        let ktype = encoded_key.remove(0).try_into()?;
+        Self::import(ktype, encoded_key)
+    }
+
+    /// Exports the keys out as bytes. 
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            PrivateKey::Ed25519(kp) => kp.to_bytes().to_vec(),
+            PrivateKey::Secp256k1(sk) => sk.secret_bytes().to_vec(),
+            PrivateKey::Aes256(key) => key.to_vec(),
+        }
+    }
+
+    /// Exports the key out with an identifier
+    pub fn encode(&self) -> Vec<u8> {
+        let mut data = vec![self.key_type().into()];
+        data.extend(self.to_bytes());
+        data
     }
 
     /// Provides the [`PrivateKeyType`] of the [`PrivateKey`]

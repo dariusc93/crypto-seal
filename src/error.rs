@@ -21,12 +21,12 @@ pub enum Error {
     InvalidPackage,
     #[error("Invalid public key")]
     InvalidPublickey,
+    #[error("Invalid private key")]
+    InvalidPrivatekey,
     #[error("Unable to convert slice: {0}")]
     InvalidLength(#[from] TryFromSliceError),
     #[error(transparent)]
     SignatureError(#[from] SignatureError),
-    #[error(transparent)]
-    BincodeError(#[from] bincode::Error),
     #[error(transparent)]
     Secp256k1Error(#[from] secp256k1::Error),
     #[error(transparent)]
@@ -34,5 +34,7 @@ pub enum Error {
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),
     #[error(transparent)]
-    Base64DecodeError(#[from] base64::DecodeError),
+    Base58EncodeError(#[from] bs58::encode::Error),
+    #[error(transparent)]
+    Base58DecodeError(#[from] bs58::decode::Error),
 }

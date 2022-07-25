@@ -3,7 +3,6 @@ pub mod key;
 
 use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zeroize::Zeroize;
 
 use crate::error::Error;
 use crate::key::{PrivateKey, PublicKey};
@@ -55,13 +54,15 @@ pub trait ToOpenWithSharedKey<T> {
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T>;
 }
 
-#[derive(Default, Deserialize, Serialize, Clone, Debug, Zeroize)]
+#[derive(Default, Deserialize, Serialize, Clone, Debug)]
 pub struct Package<T: ?Sized> {
     data: Vec<Vec<u8>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     signature: Vec<u8>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    public_key: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    public_key: Option<PublicKey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recipients: Option<Vec<PublicKey>>,
     #[serde(skip_serializing, skip_deserializing)]
     marker: PhantomData<T>,
 }
@@ -72,28 +73,43 @@ where
 {
     pub fn import(
         data: Vec<Vec<u8>>,
-        public_key: Option<Vec<u8>>,
+        public_key: Option<PublicKey>,
+        recipients: Option<Vec<PublicKey>>,
         signature: Option<Vec<u8>>,
     ) -> Self {
         let signature = signature.unwrap_or_default();
-        let public_key = public_key.unwrap_or_default();
         Self {
             data,
             signature,
             public_key,
+            recipients,
             marker: PhantomData,
         }
     }
 
-    pub fn decode(data: &str) -> Result<Self> {
-        let bytes = base64::decode(data)?;
-        let package: Package<T> = bincode::deserialize(&bytes)?;
-        Ok(package)
+    pub fn deserialize(data: &str) -> Result<Self> {
+        serde_json::from_str(data).map_err(Error::from)
     }
 
-    pub fn encode(&self) -> Result<String> {
-        let bytes = bincode::serialize(&self)?;
-        Ok(base64::encode(bytes))
+    pub fn serialize(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(Error::from)
+    }
+
+    pub fn from_slice<A: AsRef<[u8]>>(data: A) -> Result<Self> {
+        serde_json::from_slice(data.as_ref()).map_err(Error::from)
+    }
+
+    pub fn to_vec(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(self).map_err(Error::from)
+    }
+}
+
+impl<T> Package<T> {
+    pub fn has_recipient(&self, public_key: &PublicKey) -> bool {
+        if let Some(list) = &self.recipients {
+            return list.contains(public_key)
+        }
+        false
     }
 }
 
@@ -112,13 +128,7 @@ where
 {
     fn seal(&self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
-        package.signature = private_key.sign(&inner_data)?;
-        package.data = vec![private_key.encrypt(&inner_data, None)?];
-        if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.encode();
-        }
+        let package = ToSealRefWithKey::seal(self, &private_key)?;
         Ok((private_key, package))
     }
 }
@@ -142,7 +152,7 @@ where
         package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
         if let Ok(public_key) = private_key.public_key() {
-            package.public_key = public_key.encode();
+            package.public_key = Some(public_key)
         }
         Ok(package)
     }
@@ -176,7 +186,8 @@ where
                     .ok()
             })
             .collect::<Vec<_>>();
-        package.public_key = private_key.public_key()?.encode();
+        package.recipients = Some(public_key);
+        package.public_key = Some(private_key.public_key()?);
         Ok(package)
     }
 }
@@ -186,8 +197,8 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        let data = self.data.get(0).cloned().ok_or(Error::InvalidPackage)?;
-        let data = key.decrypt(&data, None)?;
+        let data = self.data.get(0).ok_or(Error::InvalidPackage)?;
+        let data = key.decrypt(data, None)?;
         key.verify(&data, &self.signature)?;
         serde_json::from_slice(&data).map_err(Error::from)
     }
@@ -198,34 +209,16 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        let pk = PublicKey::decode(&self.public_key)?;
+
+        if !self.has_recipient(&key.public_key()?) {
+            return Err(Error::InvalidPublickey);
+        }
+
+        let pk = self.public_key.as_ref().ok_or(Error::InvalidPublickey)?;
         for data in &self.data {
             if let Ok(data) = key.decrypt(data, Some(pk.clone())) {
                 pk.verify(&data, &self.signature)?;
                 return serde_json::from_slice(&data).map_err(Error::from);
-            }
-        }
-        Err(Error::DecryptionError)
-    }
-}
-
-impl<T> ToOpenWithSharedKey<T> for Package<T>
-where
-    T: DeserializeOwned,
-{
-    fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
-        // Since this should be used in the event the public_key field is empty, we will make it so it will return an error if it exist
-        // TODO: return specific/correct error
-        if key.public_key()?.key_type() != public_key.key_type() {
-            return Err(Error::InvalidPublickey);
-        }
-        if self.public_key.is_empty() {
-            for data in &self.data {
-                if let Ok(data) = key.decrypt(data, Some(public_key.clone())) {
-                    let pk = PublicKey::decode(&self.public_key)?;
-                    pk.verify(&data, &self.signature)?;
-                    return serde_json::from_slice(&data).map_err(Error::from);
-                }
             }
         }
         Err(Error::DecryptionError)
