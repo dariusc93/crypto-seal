@@ -10,6 +10,7 @@ use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{Digest, Sha512, Signature, Signer, Verifier};
 use rand::rngs::OsRng;
 use serde::{Serialize, Deserialize, Deserializer};
+use core::hash::Hash;
 use std::io;
 use zeroize::Zeroize;
 
@@ -56,10 +57,28 @@ impl Drop for PrivateKey {
 /// Container of public keys
 /// The following is supported
 /// - [`ed25519_dalek::PublicKey`]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::PublicKey),
     Secp256k1(secp256k1::PublicKey),
+}
+
+impl core::fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", bs58::encode(self.encode()).into_string())
+    }
+}
+
+impl Hash for PublicKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.encode().hash(state)
+    }
+}
+
+impl PartialEq for PublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.encode() == other.encode()
+    }
 }
 
 impl Serialize for PublicKey {
