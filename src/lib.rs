@@ -148,7 +148,7 @@ where
 {
     fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
+        let inner_data = serde_json::to_vec(self)?;
         package.signature = private_key.sign(&inner_data)?;
         package.data = vec![private_key.encrypt(&inner_data, None)?];
         if let Ok(public_key) = private_key.public_key() {
@@ -173,7 +173,7 @@ where
 {
     fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
         let mut package = Package::default();
-        let inner_data = serde_json::to_vec(&self)?;
+        let inner_data = serde_json::to_vec(self)?;
         let sig = private_key.sign(&inner_data)?;
         let ptype = private_key.public_key()?.key_type();
         package.signature = sig;
