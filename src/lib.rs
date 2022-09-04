@@ -197,7 +197,7 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        let data = self.data.get(0).ok_or(Error::InvalidPackage)?;
+        let data = self.data.first().ok_or(Error::InvalidPackage)?;
         let data = key.decrypt(data, None)?;
         key.verify(&data, &self.signature)?;
         serde_json::from_slice(&data).map_err(Error::from)
