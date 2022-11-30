@@ -1,16 +1,14 @@
 use crate::{error::Error, Result};
 use aes_gcm::{
-    aead::{
-        stream::{DecryptorBE32, EncryptorBE32},
-        Aead, NewAead,
-    },
-    Aes256Gcm, Key, Nonce,
+    aead::stream::{DecryptorBE32, EncryptorBE32},
+    aead::Aead,
+    Aes256Gcm, Key, KeyInit, Nonce,
 };
+use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{Digest, Sha512, Signature, Signer, Verifier};
 use rand::rngs::OsRng;
-use serde::{Serialize, Deserialize, Deserializer};
-use core::hash::Hash;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io;
 use zeroize::Zeroize;
 
@@ -84,7 +82,8 @@ impl PartialEq for PublicKey {
 impl Serialize for PublicKey {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         let pk_str = bs58::encode(self.encode()).into_string();
         serializer.serialize_str(&pk_str)
     }
@@ -96,11 +95,12 @@ impl<'d> Deserialize<'d> for PublicKey {
         D: Deserializer<'d>,
     {
         let pk_str = <String>::deserialize(deserializer)?;
-        let bytes = bs58::decode(pk_str).into_vec().map_err(serde::de::Error::custom)?;
+        let bytes = bs58::decode(pk_str)
+            .into_vec()
+            .map_err(serde::de::Error::custom)?;
         PublicKey::decode(&bytes).map_err(serde::de::Error::custom)
     }
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PublicKeyType {
@@ -270,6 +270,8 @@ impl PublicKey {
                 Ok(())
             }
             PublicKey::Secp256k1(pubkey) => {
+                use sha2::Digest;
+
                 let secp = secp256k1::Secp256k1::new();
 
                 let mut hasher = sha2::Sha256::new();
@@ -404,7 +406,8 @@ impl PrivateKey {
     }
 
     /// Imports a private key with a identifier to identify if its [`PrivateKey::Ed25519`], [`PrivateKey::Secp256k1`], or [`PrivateKey::Aes256`]
-    pub fn decode(bytes: &[u8]) -> Result<PrivateKey> {
+    pub fn decode<B: AsRef<[u8]>>(bytes: B) -> Result<PrivateKey> {
+        let bytes = bytes.as_ref();
         if bytes.is_empty() {
             return Err(Error::InvalidPrivatekey);
         }
@@ -413,7 +416,7 @@ impl PrivateKey {
         Self::import(ktype, encoded_key)
     }
 
-    /// Exports the keys out as bytes. 
+    /// Exports the keys out as bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             PrivateKey::Ed25519(kp) => kp.to_bytes().to_vec(),
@@ -455,7 +458,10 @@ impl PrivateKey {
     /// Sign the data provided using [`PrivateKey`]
     /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
-    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn sign<B: AsRef<[u8]>>(&self, data: B) -> Result<Vec<u8>> {
+        use sha2::Digest;
+
+        let data = data.as_ref();
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher = sha2::Sha512::new();
@@ -568,7 +574,7 @@ impl PrivateKey {
     pub fn encrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
         let raw_nonce = generate(12);
-        let key = Key::from_slice(&key);
+        let key = Key::<Aes256Gcm>::from_slice(&key);
         let nonce = Nonce::from_slice(&raw_nonce);
         let cipher = Aes256Gcm::new(key);
         let mut data = cipher
@@ -583,7 +589,7 @@ impl PrivateKey {
     pub fn decrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
         let (nonce, data) = extract_data_slice(data, 12);
-        let key = Key::from_slice(&key);
+        let key = Key::<Aes256Gcm>::from_slice(&key);
         let nonce = Nonce::from_slice(nonce);
         let cipher = Aes256Gcm::new(key);
         cipher
@@ -604,7 +610,7 @@ impl PrivateKey {
         let key = self.fetch_encryption_key(pubkey)?;
         let nonce = generate(7);
 
-        let key = Key::from_slice(&key);
+        let key = Key::<Aes256Gcm>::from_slice(&key);
         let cipher = Aes256Gcm::new(key);
         let mut buffer = [0u8; WRITE_BUFFER_SIZE];
         let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
@@ -643,7 +649,7 @@ impl PrivateKey {
         let mut nonce = vec![0u8; 7];
         reader.read_exact(&mut nonce)?;
 
-        let key = Key::from_slice(&key);
+        let key = Key::<Aes256Gcm>::from_slice(&key);
         let cipher = Aes256Gcm::new(key);
 
         let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
