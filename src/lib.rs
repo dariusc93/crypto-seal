@@ -54,7 +54,7 @@ pub trait ToOpenWithSharedKey<T> {
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T>;
 }
 
-#[derive(Default, Deserialize, Serialize, Clone, Debug)]
+#[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct Package<T: ?Sized> {
     data: Vec<Vec<u8>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
