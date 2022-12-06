@@ -106,10 +106,16 @@ where
 
 impl<T> Package<T> {
     pub fn has_recipient(&self, public_key: &PublicKey) -> bool {
-        if let Some(list) = &self.recipients {
-            return list.contains(public_key)
+        if let Ok(list) = self.recipients() {
+            return list.contains(public_key);
         }
         false
+    }
+
+    pub fn recipients(&self) -> Result<&[PublicKey]> {
+        self.recipients
+            .as_deref()
+            .ok_or(Error::RecipientsNotAvailable)
     }
 }
 
@@ -209,7 +215,6 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-
         if !self.has_recipient(&key.public_key()?) {
             return Err(Error::InvalidPublickey);
         }

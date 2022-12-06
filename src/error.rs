@@ -23,6 +23,8 @@ pub enum Error {
     InvalidPublickey,
     #[error("Invalid private key")]
     InvalidPrivatekey,
+    #[error("Recipients was not set or available")]
+    RecipientsNotAvailable,
     #[error("Unable to convert slice: {0}")]
     InvalidLength(#[from] TryFromSliceError),
     #[error(transparent)]
