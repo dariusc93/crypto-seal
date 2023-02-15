@@ -34,7 +34,7 @@ mod test {
         let (key, sealed_data) = my_data.seal()?;
 
         let encoded_package = sealed_data.to_vec()?;
-        let decoded_package = Package::<String>::from_slice(&encoded_package)?;
+        let decoded_package = Package::<String>::from_slice(encoded_package)?;
 
         let unsealed_data = decoded_package.open(&key)?;
 

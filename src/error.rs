@@ -1,7 +1,7 @@
-use std::array::TryFromSliceError;
-use thiserror::Error;
-use std::io;
 use ed25519_dalek::SignatureError;
+use std::array::TryFromSliceError;
+use std::io;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
