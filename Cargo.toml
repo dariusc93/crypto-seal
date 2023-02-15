@@ -24,7 +24,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 x25519-dalek = "1"
 ed25519-dalek = { version = "1", features = ["serde"] }
 curve25519-dalek = "3.2"
-secp256k1 = { version = "0.24", features = ["rand-std", "serde"] }
+secp256k1 = { version = "0.26", features = ["rand-std", "serde"] }
 sha2 = "0.10"
 hmac = "0.12"
 aes-gcm = { version = "0.10", features = ["stream"] }
