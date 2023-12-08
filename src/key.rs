@@ -6,9 +6,11 @@ use aes_gcm::{
 };
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
-use ed25519_dalek::{Digest, Sha512, Signature, Signer, Verifier};
+use ed25519_dalek::{SecretKey, Signature, Signer, SigningKey, Verifier};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
+use sha2::Digest;
+use sha2::Sha512;
 use std::io;
 use zeroize::Zeroize;
 
@@ -17,9 +19,9 @@ use zeroize::Zeroize;
 /// - [`ed25519_dalek`]
 /// - [`secp256k1`]
 /// - [`aes_gcm::Aes256Gcm`]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum PrivateKey {
-    Ed25519(ed25519_dalek::Keypair),
+    Ed25519(ed25519_dalek::SigningKey),
     Secp256k1(secp256k1::SecretKey),
     Aes256([u8; 32]),
 }
@@ -33,8 +35,9 @@ impl Default for PrivateKey {
 impl Zeroize for PrivateKey {
     fn zeroize(&mut self) {
         match self {
-            PrivateKey::Ed25519(kp) => {
-                kp.secret.zeroize();
+            PrivateKey::Ed25519(_) => {
+                //Note: Due to trait bounds, we cannot call it directly,
+                //      but it will still be called when it is dropped
             }
             PrivateKey::Secp256k1(_kp) => {
                 //TODO: Zeroize or destroy key
@@ -57,7 +60,7 @@ impl Drop for PrivateKey {
 /// - [`ed25519_dalek::PublicKey`]
 #[derive(Debug, Clone, Eq)]
 pub enum PublicKey {
-    Ed25519(ed25519_dalek::PublicKey),
+    Ed25519(ed25519_dalek::VerifyingKey),
     Secp256k1(secp256k1::PublicKey),
 }
 
@@ -131,8 +134,8 @@ impl From<PublicKeyType> for u8 {
     }
 }
 
-impl From<ed25519_dalek::PublicKey> for PublicKey {
-    fn from(pk: ed25519_dalek::PublicKey) -> Self {
+impl From<ed25519_dalek::VerifyingKey> for PublicKey {
+    fn from(pk: ed25519_dalek::VerifyingKey) -> Self {
         PublicKey::Ed25519(pk)
     }
 }
@@ -161,7 +164,7 @@ impl TryFrom<&PrivateKey> for x25519_dalek::StaticSecret {
         match value {
             PrivateKey::Ed25519(kp) => {
                 let mut hasher: Sha512 = Sha512::new();
-                hasher.update(kp.secret.as_ref());
+                hasher.update(kp.as_bytes());
                 let hash = hasher.finalize().to_vec();
                 let mut new_sk: [u8; 32] = [0; 32];
                 new_sk.copy_from_slice(&hash[..32]);
@@ -182,7 +185,7 @@ impl TryFrom<PrivateKey> for x25519_dalek::StaticSecret {
     }
 }
 
-impl TryFrom<PublicKey> for ed25519_dalek::PublicKey {
+impl TryFrom<PublicKey> for ed25519_dalek::VerifyingKey {
     type Error = Error;
 
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
@@ -213,13 +216,16 @@ impl TryFrom<PublicKey> for x25519_dalek::PublicKey {
 impl PublicKey {
     pub fn from_bytes(key_type: PublicKeyType, bytes: &[u8]) -> Result<PublicKey> {
         match key_type {
-            PublicKeyType::Ed25519 => Self::from_ed25519_bytes(bytes),
+            PublicKeyType::Ed25519 => {
+                let bytes: [u8; 32] = bytes.try_into()?;
+                Self::from_ed25519_bytes(&bytes)
+            }
             PublicKeyType::Secp256k1 => Self::from_secp256k1_bytes(bytes),
         }
     }
 
-    pub fn from_ed25519_bytes(bytes: &[u8]) -> Result<PublicKey> {
-        let pk = ed25519_dalek::PublicKey::from_bytes(bytes)?;
+    pub fn from_ed25519_bytes(bytes: &[u8; 32]) -> Result<PublicKey> {
+        let pk = ed25519_dalek::VerifyingKey::from_bytes(bytes)?;
         Ok(PublicKey::Ed25519(pk))
     }
 
@@ -265,19 +271,17 @@ impl PublicKey {
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         match self {
             PublicKey::Ed25519(pubkey) => {
-                let signature = Signature::from_bytes(signature)?;
+                let signature = Signature::from_bytes(signature.try_into()?);
                 pubkey.verify(data, &signature)?;
                 Ok(())
             }
             PublicKey::Secp256k1(pubkey) => {
-                use sha2::Digest;
-
                 let secp = secp256k1::Secp256k1::new();
 
                 let mut hasher = sha2::Sha256::new();
                 hasher.update(data);
                 let hash = hasher.finalize().to_vec();
-                let msg = secp256k1::Message::from_slice(&hash)?;
+                let msg = secp256k1::Message::from_digest_slice(&hash)?;
 
                 let sig = secp256k1::ecdsa::Signature::from_compact(signature)?;
                 secp.verify_ecdsa(&msg, &sig, pubkey)?;
@@ -289,18 +293,17 @@ impl PublicKey {
 
 impl PublicKey {
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
-    pub fn verify_reader(
-        &self,
-        reader: &mut impl io::Read,
-        signature: &[u8],
-        context: Option<&[u8]>,
-    ) -> Result<()> {
+    pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
             PublicKey::Ed25519(key) => {
+                if signature.len() != 34 {
+                    return Err(Error::InvalidSignature);
+                }
                 let mut hasher: Sha512 = Sha512::new();
                 io::copy(reader, &mut hasher)?;
-                let signature = Signature::from_bytes(signature)?;
-                key.verify_prehashed(hasher, context, &signature)?;
+                let hash = hasher.finalize().to_vec();
+                let signature = Signature::from_bytes(signature.try_into()?);
+                key.verify(&hash, &signature)?;
                 Ok(())
             }
             PublicKey::Secp256k1(key) => {
@@ -308,7 +311,7 @@ impl PublicKey {
                 let mut hasher: Sha512 = Sha512::new();
                 io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
-                let msg = secp256k1::Message::from_slice(&hash)?;
+                let msg = secp256k1::Message::from_digest_slice(&hash)?;
 
                 let sig = secp256k1::ecdsa::Signature::from_compact(signature)?;
                 secp.verify_ecdsa(&msg, &sig, key)?;
@@ -371,8 +374,16 @@ impl PrivateKey {
     pub fn new_with(key_type: PrivateKeyType) -> Self {
         match key_type {
             PrivateKeyType::Ed25519 => {
+                #[inline]
+                pub fn generate<R: rand::CryptoRng + rand::RngCore + ?Sized>(
+                    csprng: &mut R,
+                ) -> SigningKey {
+                    let mut secret = SecretKey::default();
+                    csprng.fill_bytes(&mut secret);
+                    SigningKey::from_bytes(&secret)
+                }
                 let mut csprng = OsRng {};
-                let key = ed25519_dalek::Keypair::generate(&mut csprng);
+                let key = generate(&mut csprng);
                 PrivateKey::Ed25519(key)
             }
             PrivateKeyType::Aes256 => {
@@ -391,9 +402,12 @@ impl PrivateKey {
     pub fn import(key_type: PrivateKeyType, key: Vec<u8>) -> Result<Self> {
         let key = zeroize::Zeroizing::new(key);
         match key_type {
-            PrivateKeyType::Ed25519 => ed25519_dalek::Keypair::from_bytes(&key)
-                .map(PrivateKey::Ed25519)
-                .map_err(Error::from),
+            PrivateKeyType::Ed25519 => {
+                let key: [u8; 64] = key.as_slice().try_into()?;
+                ed25519_dalek::SigningKey::from_keypair_bytes(&key)
+                    .map(PrivateKey::Ed25519)
+                    .map_err(Error::from)
+            }
             PrivateKeyType::Aes256 => key
                 .as_slice()
                 .try_into()
@@ -447,7 +461,7 @@ impl PrivateKey {
     pub fn public_key(&self) -> Result<PublicKey> {
         match self {
             PrivateKey::Aes256(_) => Err(Error::Unsupported),
-            PrivateKey::Ed25519(key) => Ok(key.public.into()),
+            PrivateKey::Ed25519(key) => Ok(key.verifying_key().into()),
             PrivateKey::Secp256k1(pk) => {
                 let secp = secp256k1::Secp256k1::new();
                 Ok(secp256k1::PublicKey::from_secret_key(&secp, pk).into())
@@ -459,8 +473,6 @@ impl PrivateKey {
     /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
     pub fn sign<B: AsRef<[u8]>>(&self, data: B) -> Result<Vec<u8>> {
-        use sha2::Digest;
-
         let data = data.as_ref();
         match self {
             PrivateKey::Aes256(_) => {
@@ -479,7 +491,7 @@ impl PrivateKey {
                 let mut hasher = sha2::Sha256::new();
                 hasher.update(data);
                 let hash = hasher.finalize().to_vec();
-                let msg = secp256k1::Message::from_slice(&hash)?;
+                let msg = secp256k1::Message::from_digest_slice(&hash)?;
                 Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
             }
         }
@@ -488,11 +500,7 @@ impl PrivateKey {
     /// Sign the data from [`std::io::Read`] using [`PrivateKey`]
     /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
-    pub fn sign_reader(
-        &self,
-        reader: &mut impl io::Read,
-        context: Option<&[u8]>,
-    ) -> Result<Vec<u8>> {
+    pub fn sign_reader(&self, reader: &mut impl io::Read) -> Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -504,7 +512,8 @@ impl PrivateKey {
             PrivateKey::Ed25519(key) => {
                 let mut hasher: Sha512 = Sha512::new();
                 io::copy(reader, &mut hasher)?;
-                let signature = key.sign_prehashed(hasher, context)?;
+                let hash = hasher.finalize().to_vec();
+                let signature = key.try_sign(&hash)?;
                 Ok(signature.to_bytes().to_vec())
             }
             PrivateKey::Secp256k1(key) => {
@@ -512,7 +521,7 @@ impl PrivateKey {
                 let mut hasher: Sha512 = Sha512::new();
                 io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
-                let msg = secp256k1::Message::from_slice(&hash)?;
+                let msg = secp256k1::Message::from_digest_slice(&hash)?;
                 Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
             }
         }
@@ -543,12 +552,7 @@ impl PrivateKey {
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
     /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
     //TODO: Use HMAC for AES
-    pub fn verify_reader(
-        &self,
-        reader: &mut impl io::Read,
-        signature: &[u8],
-        context: Option<&[u8]>,
-    ) -> Result<()> {
+    pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
             PrivateKey::Aes256(_) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -562,7 +566,7 @@ impl PrivateKey {
             }
             _ => {
                 let public_key = self.public_key()?;
-                public_key.verify_reader(reader, signature, context)
+                public_key.verify_reader(reader, signature)
             }
         }
     }
@@ -663,7 +667,7 @@ impl PrivateKey {
 
                     writer.write_all(&plaintext)?
                 }
-                Ok(read_count) if read_count == 0 => break,
+                Ok(0) => break,
                 Ok(read_count) => {
                     let plaintext = stream
                         .decrypt_last(&buffer[..read_count])

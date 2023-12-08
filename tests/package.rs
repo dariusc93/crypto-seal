@@ -49,7 +49,6 @@ mod test {
         let alice_pk = PrivateKey::new();
 
         let random_pk = (0..50)
-            .into_iter()
             .map(|_| PrivateKey::new())
             .collect::<Vec<_>>();
 
@@ -194,7 +193,6 @@ mod test {
         let alice_pk = PrivateKey::new();
 
         let random_pk = (0..50)
-            .into_iter()
             .map(|_| PrivateKey::new())
             .collect::<Vec<_>>();
 
@@ -250,7 +248,6 @@ mod test {
         let alice_pk = PrivateKey::new_with(PrivateKeyType::Secp256k1);
 
         let random_pk = (0..50)
-            .into_iter()
             .map(|_| PrivateKey::new_with(PrivateKeyType::Secp256k1))
             .collect::<Vec<_>>();
 
