@@ -19,11 +19,23 @@ use zeroize::Zeroize;
 /// - [`ed25519_dalek`]
 /// - [`secp256k1`]
 /// - [`aes_gcm::Aes256Gcm`]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum PrivateKey {
     Ed25519(ed25519_dalek::SigningKey),
     Secp256k1(secp256k1::SecretKey),
     Aes256([u8; 32]),
+}
+
+impl std::fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ty = match self {
+            PrivateKey::Ed25519(_) => "ed25519",
+            PrivateKey::Secp256k1(_) => "secp256k1",
+            PrivateKey::Aes256(_) => "aes256",
+        };
+
+        write!(f, "{ty}")
+    }
 }
 
 impl Default for PrivateKey {
@@ -58,10 +70,16 @@ impl Drop for PrivateKey {
 /// Container of public keys
 /// The following is supported
 /// - [`ed25519_dalek::PublicKey`]
-#[derive(Debug, Clone, Copy, Eq)]
+#[derive(Clone, Copy, Eq)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::VerifyingKey),
     Secp256k1(secp256k1::PublicKey),
+}
+
+impl std::fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl core::fmt::Display for PublicKey {
@@ -748,7 +766,7 @@ fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
 }
 
 /// Used to generate random amount of data and store it in a Vec with a specific capacity
-pub(crate)fn generate<const N: usize>() -> Vec<u8> {
+pub(crate) fn generate<const N: usize>() -> Vec<u8> {
     use rand::RngCore;
     let mut buffer = vec![0u8; N];
     OsRng.fill_bytes(&mut buffer);
