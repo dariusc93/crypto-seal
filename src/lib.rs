@@ -3,11 +3,40 @@ pub mod key;
 
 use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::key::{PrivateKey, PublicKey};
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
+pub enum RecipientCarrier {
+    Direct {
+        public_key: PublicKey,
+    },
+    Bundle {
+        public_keys: HashMap<PublicKey, Vec<u8>>,
+    },
+    #[default]
+    None,
+}
+
+impl RecipientCarrier {
+    fn recipients(&self) -> Vec<PublicKey> {
+        match self {
+            RecipientCarrier::Direct { public_key } => vec![*public_key],
+            RecipientCarrier::Bundle { public_keys } => {
+                public_keys.keys().copied().collect::<Vec<_>>()
+            }
+            RecipientCarrier::None => vec![],
+        }
+    }
+
+    fn is_none(&self) -> bool {
+        matches!(self, RecipientCarrier::None)
+    }
+}
 
 pub trait ToSeal {
     /// Consume and encrypt a [`serde::Serialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
@@ -56,13 +85,13 @@ pub trait ToOpenWithSharedKey<T> {
 
 #[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct Package<T: ?Sized> {
-    data: Vec<Vec<u8>>,
+    data: Vec<u8>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     signature: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     public_key: Option<PublicKey>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    recipients: Option<Vec<PublicKey>>,
+    #[serde(default, skip_serializing_if = "RecipientCarrier::is_none")]
+    recipients: RecipientCarrier,
     #[serde(skip_serializing, skip_deserializing)]
     marker: PhantomData<T>,
 }
@@ -72,9 +101,9 @@ where
     T: Serialize + DeserializeOwned + Clone,
 {
     pub fn import(
-        data: Vec<Vec<u8>>,
+        data: Vec<u8>,
         public_key: Option<PublicKey>,
-        recipients: Option<Vec<PublicKey>>,
+        recipients: RecipientCarrier,
         signature: Option<Vec<u8>>,
     ) -> Self {
         let signature = signature.unwrap_or_default();
@@ -106,16 +135,12 @@ where
 
 impl<T> Package<T> {
     pub fn has_recipient(&self, public_key: &PublicKey) -> bool {
-        if let Ok(list) = self.recipients() {
-            return list.contains(public_key);
-        }
-        false
+        let list = self.recipients();
+        list.contains(public_key)
     }
 
-    pub fn recipients(&self) -> Result<&[PublicKey]> {
-        self.recipients
-            .as_deref()
-            .ok_or(Error::RecipientsNotAvailable)
+    pub fn recipients(&self) -> Vec<PublicKey> {
+        self.recipients.recipients()
     }
 }
 
@@ -156,7 +181,7 @@ where
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(self)?;
         package.signature = private_key.sign(&inner_data)?;
-        package.data = vec![private_key.encrypt(&inner_data, None)?];
+        package.data = private_key.encrypt(&inner_data, Default::default())?;
         if let Ok(public_key) = private_key.public_key() {
             package.public_key = Some(public_key)
         }
@@ -182,17 +207,29 @@ where
         let inner_data = serde_json::to_vec(self)?;
         let sig = private_key.sign(&inner_data)?;
         let ptype = private_key.public_key()?.key_type();
+        let key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
+        let data = private_key.encrypt(&inner_data, key::CarrierKeyType::Direct { key })?;
+
+        package.data = data;
         package.signature = sig;
-        package.data = public_key
-            .iter()
-            .filter(|public_key| public_key.key_type() == ptype)
-            .filter_map(|public_key| {
-                private_key
-                    .encrypt(&inner_data, Some(public_key.clone()))
-                    .ok()
-            })
-            .collect::<Vec<_>>();
-        package.recipients = Some(public_key);
+        package.recipients = RecipientCarrier::Bundle {
+            public_keys: HashMap::from_iter(
+                public_key
+                    .iter()
+                    .filter(|public_key| public_key.key_type() == ptype)
+                    .filter_map(|public_key| {
+                        private_key
+                            .encrypt(
+                                &key,
+                                key::CarrierKeyType::Exchange {
+                                    public_key: *public_key,
+                                },
+                            )
+                            .map(|data| (*public_key, data))
+                            .ok()
+                    }),
+            ),
+        };
         package.public_key = Some(private_key.public_key()?);
         Ok(package)
     }
@@ -203,8 +240,7 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        let data = self.data.first().ok_or(Error::InvalidPackage)?;
-        let data = key.decrypt(data, None)?;
+        let data = key.decrypt(&self.data, Default::default())?;
         key.verify(&data, &self.signature)?;
         serde_json::from_slice(&data).map_err(Error::from)
     }
@@ -215,17 +251,31 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        if !self.has_recipient(&key.public_key()?) {
+        let own_pk = key.public_key()?;
+        if !self.has_recipient(&own_pk) {
             return Err(Error::InvalidPublickey);
         }
 
         let pk = self.public_key.as_ref().ok_or(Error::InvalidPublickey)?;
-        for data in &self.data {
-            if let Ok(data) = key.decrypt(data, Some(pk.clone())) {
-                pk.verify(&data, &self.signature)?;
-                return serde_json::from_slice(&data).map_err(Error::from);
+
+        let enc_k = match &self.recipients {
+            RecipientCarrier::Bundle { public_keys } => {
+                public_keys.get(&own_pk).expect("recipient available")
             }
-        }
-        Err(Error::DecryptionError)
+            _ => return Err(Error::RecipientsNotAvailable),
+        };
+
+        let en_key = key.decrypt(enc_k, key::CarrierKeyType::Exchange { public_key: *pk })?;
+
+        let data = key.decrypt(
+            &self.data,
+            key::CarrierKeyType::Direct {
+                key: en_key.as_slice().try_into()?,
+            },
+        )?;
+
+        pk.verify(&data, &self.signature)?;
+
+        serde_json::from_slice(&data).map_err(Error::from)
     }
 }

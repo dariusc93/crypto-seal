@@ -58,7 +58,7 @@ impl Drop for PrivateKey {
 /// Container of public keys
 /// The following is supported
 /// - [`ed25519_dalek::PublicKey`]
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Copy, Eq)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::VerifyingKey),
     Secp256k1(secp256k1::PublicKey),
@@ -388,7 +388,7 @@ impl PrivateKey {
             }
             PrivateKeyType::Aes256 => {
                 let mut key_sized = [0u8; 32];
-                key_sized.copy_from_slice(&generate(32));
+                key_sized.copy_from_slice(&generate::<32>());
                 PrivateKey::Aes256(key_sized)
             }
             PrivateKeyType::Secp256k1 => {
@@ -479,7 +479,7 @@ impl PrivateKey {
                 let mut hasher = sha2::Sha512::new();
                 hasher.update(data);
                 let hash = hasher.finalize().to_vec();
-                let enc_hash = self.encrypt(&hash, None)?;
+                let enc_hash = self.encrypt(&hash, Default::default())?;
                 Ok(enc_hash)
             }
             PrivateKey::Ed25519(key) => {
@@ -506,7 +506,7 @@ impl PrivateKey {
                 let mut hasher: Sha512 = Sha512::new();
                 io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
-                let enc_hash = self.encrypt(&hash, None)?;
+                let enc_hash = self.encrypt(&hash, Default::default())?;
                 Ok(enc_hash)
             }
             PrivateKey::Ed25519(key) => {
@@ -536,7 +536,7 @@ impl PrivateKey {
                 let mut hasher: Sha512 = Sha512::new();
                 hasher.update(data);
                 let hash = hasher.finalize().to_vec();
-                let dec_hash = self.decrypt(signature, None)?;
+                let dec_hash = self.decrypt(signature, Default::default())?;
                 if dec_hash == hash {
                     return Ok(());
                 }
@@ -558,7 +558,7 @@ impl PrivateKey {
                 let mut hasher: Sha512 = Sha512::new();
                 io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
-                let dec_hash = self.decrypt(signature, None)?;
+                let dec_hash = self.decrypt(signature, Default::default())?;
                 if dec_hash == hash {
                     return Ok(());
                 }
@@ -572,12 +572,27 @@ impl PrivateKey {
     }
 }
 
+#[derive(Default, Copy, Clone, PartialEq)]
+pub enum CarrierKeyType {
+    /// Use AES128 key
+    Direct { key: [u8; 32] },
+
+    /// Use key exchange to generate a shared key
+    Exchange { public_key: PublicKey },
+
+    /// Use own private key
+    /// > **Note** If public key encryption is used, this will use your own private/public key for key exchange
+    /// otherwise if its AES128, it will encrypt with that key itself
+    #[default]
+    None,
+}
+
 impl PrivateKey {
     /// Encrypt the data using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
-    pub fn encrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
+    pub fn encrypt(&self, data: &[u8], pubkey: CarrierKeyType) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
-        let raw_nonce = generate(12);
+        let raw_nonce = generate::<12>();
         let key = Key::<Aes256Gcm>::from_slice(&key);
         let nonce = Nonce::from_slice(&raw_nonce);
         let cipher = Aes256Gcm::new(key);
@@ -590,7 +605,7 @@ impl PrivateKey {
 
     /// Decrypt the data using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
-    pub fn decrypt(&self, data: &[u8], pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
+    pub fn decrypt(&self, data: &[u8], pubkey: CarrierKeyType) -> Result<Vec<u8>> {
         let key = self.fetch_encryption_key(pubkey)?;
         let (nonce, data) = extract_data_slice(data, 12);
         let key = Key::<Aes256Gcm>::from_slice(&key);
@@ -609,10 +624,10 @@ impl PrivateKey {
         &self,
         reader: &mut impl io::Read,
         writer: &mut impl io::Write,
-        pubkey: Option<PublicKey>,
+        pubkey: CarrierKeyType,
     ) -> Result<()> {
         let key = self.fetch_encryption_key(pubkey)?;
-        let nonce = generate(7);
+        let nonce = generate::<7>();
 
         let key = Key::<Aes256Gcm>::from_slice(&key);
         let cipher = Aes256Gcm::new(key);
@@ -647,7 +662,7 @@ impl PrivateKey {
         &self,
         reader: &mut impl io::Read,
         writer: &mut impl io::Write,
-        pubkey: Option<PublicKey>,
+        pubkey: CarrierKeyType,
     ) -> Result<()> {
         let key = self.fetch_encryption_key(pubkey)?;
         let mut nonce = vec![0u8; 7];
@@ -684,34 +699,43 @@ impl PrivateKey {
     }
 
     /// Used internally to obtain the encryption key
-    fn fetch_encryption_key(&self, pubkey: Option<PublicKey>) -> Result<Vec<u8>> {
-        match self {
-            PrivateKey::Aes256(key) => Ok(key.to_vec()),
-            PrivateKey::Secp256k1(pk) => {
-                let public_key: secp256k1::PublicKey = match pubkey {
-                    Some(pubkey) => pubkey.try_into()?,
-                    None => {
+    fn fetch_encryption_key(&self, pubkey: CarrierKeyType) -> Result<Vec<u8>> {
+        match pubkey {
+            CarrierKeyType::Direct { key } => Ok(key.to_vec()),
+            CarrierKeyType::Exchange { public_key } => match self {
+                PrivateKey::Aes256(key) => Ok(key.to_vec()),
+                PrivateKey::Secp256k1(pk) => {
+                    let public_key: secp256k1::PublicKey = public_key.try_into()?;
+
+                    let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
+                    Ok(shared_key.as_ref().to_vec())
+                }
+                PrivateKey::Ed25519(_) => {
+                    let static_key: x25519_dalek::StaticSecret = self.try_into()?;
+                    let public_key: x25519_dalek::PublicKey = public_key.try_into()?;
+
+                    let enc_key = static_key.diffie_hellman(&public_key);
+                    Ok(enc_key.as_bytes().to_vec())
+                }
+            },
+            CarrierKeyType::None => match self {
+                PrivateKey::Aes256(key) => Ok(key.to_vec()),
+                PrivateKey::Secp256k1(pk) => {
+                    let public_key: secp256k1::PublicKey = {
                         let secp = secp256k1::Secp256k1::new();
                         secp256k1::PublicKey::from_secret_key(&secp, pk)
-                    }
-                };
-                let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
-                Ok(shared_key.as_ref().to_vec())
-            }
-            PrivateKey::Ed25519(_) => {
-                let static_key: x25519_dalek::StaticSecret = self.try_into()?;
-                let public_key: x25519_dalek::PublicKey = match pubkey {
-                    //Note: This may not be ideal to use one own key for
-                    //      performing a ecdh exchange. While there is no known
-                    //      attack, we should still be cautious of performing
-                    //      this and might be wise in the future to have dual
-                    //      keys. One ed25519 and another x25519
-                    Some(pubkey) => pubkey.try_into()?,
-                    None => x25519_dalek::PublicKey::from(&static_key),
-                };
-                let enc_key = static_key.diffie_hellman(&public_key);
-                Ok(enc_key.as_bytes().to_vec())
-            }
+                    };
+                    let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
+                    Ok(shared_key.as_ref().to_vec())
+                }
+                PrivateKey::Ed25519(_) => {
+                    let static_key: x25519_dalek::StaticSecret = self.try_into()?;
+                    let public_key: x25519_dalek::PublicKey =
+                        x25519_dalek::PublicKey::from(&static_key);
+                    let enc_key = static_key.diffie_hellman(&public_key);
+                    Ok(enc_key.as_bytes().to_vec())
+                }
+            },
         }
     }
 }
@@ -724,9 +748,9 @@ fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
 }
 
 /// Used to generate random amount of data and store it in a Vec with a specific capacity
-fn generate(size: usize) -> Vec<u8> {
+pub(crate)fn generate<const N: usize>() -> Vec<u8> {
     use rand::RngCore;
-    let mut buffer = vec![0u8; size];
+    let mut buffer = vec![0u8; N];
     OsRng.fill_bytes(&mut buffer);
     buffer
 }

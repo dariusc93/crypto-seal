@@ -9,9 +9,9 @@ mod test {
 
         let plaintext = b"Hello, World!";
     
-        let ciphertext = private_key.encrypt(plaintext, None)?;
+        let ciphertext = private_key.encrypt(plaintext, Default::default())?;
     
-        let decryptedtext = private_key.decrypt(&ciphertext, None)?;
+        let decryptedtext = private_key.decrypt(&ciphertext, Default::default())?;
     
         assert_eq!(plaintext, &decryptedtext[..]);
         Ok(())
@@ -23,9 +23,9 @@ mod test {
 
         let plaintext = b"Hello, World!";
     
-        let ciphertext = private_key.encrypt(plaintext, None)?;
+        let ciphertext = private_key.encrypt(plaintext, Default::default())?;
     
-        let decryptedtext = private_key.decrypt(&ciphertext, None)?;
+        let decryptedtext = private_key.decrypt(&ciphertext, Default::default())?;
     
         assert_eq!(plaintext, &decryptedtext[..]);
         Ok(())
@@ -37,9 +37,9 @@ mod test {
 
         let plaintext = b"Hello, World!";
     
-        let ciphertext = private_key.encrypt(plaintext, None)?;
+        let ciphertext = private_key.encrypt(plaintext, Default::default())?;
     
-        let decryptedtext = private_key.decrypt(&ciphertext, None)?;
+        let decryptedtext = private_key.decrypt(&ciphertext, Default::default())?;
     
         assert_eq!(plaintext, &decryptedtext[..]);
         Ok(())
