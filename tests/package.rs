@@ -48,9 +48,7 @@ mod test {
         use crypto_seal::ToSealRefWithSharedKey;
         let alice_pk = PrivateKey::new();
 
-        let random_pk = (0..50)
-            .map(|_| PrivateKey::new())
-            .collect::<Vec<_>>();
+        let random_pk = (0..50).map(|_| PrivateKey::new()).collect::<Vec<_>>();
 
         let message = String::from("Hello Everyone!");
         let sealed_for_many = message.seal(
@@ -192,9 +190,7 @@ mod test {
         use crypto_seal::ToSealRefWithSharedKey;
         let alice_pk = PrivateKey::new();
 
-        let random_pk = (0..50)
-            .map(|_| PrivateKey::new())
-            .collect::<Vec<_>>();
+        let random_pk = (0..50).map(|_| PrivateKey::new()).collect::<Vec<_>>();
 
         let message = String::from("Hello Everyone!");
         let sealed_for_many = message.seal(

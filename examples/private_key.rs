@@ -1,5 +1,5 @@
-use crypto_seal::key::PrivateKey;
 use crypto_seal::error::Error;
+use crypto_seal::key::PrivateKey;
 
 fn main() -> Result<(), Error> {
     let private_key = PrivateKey::new();

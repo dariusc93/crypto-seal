@@ -44,5 +44,5 @@ pub enum Error {
     OtherVariantError(#[from] libp2p_identity::OtherVariantError),
     #[cfg(feature = "libp2p-identity")]
     #[error(transparent)]
-    DecodingError(#[from] libp2p_identity::DecodingError)
+    DecodingError(#[from] libp2p_identity::DecodingError),
 }

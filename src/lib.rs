@@ -11,7 +11,7 @@ use crate::key::{PrivateKey, PublicKey};
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum RecipientCarrier {
     Direct {
         public_key: PublicKey,

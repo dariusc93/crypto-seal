@@ -8,11 +8,11 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
 
         let plaintext = b"Hello, World!";
-    
+
         let ciphertext = private_key.encrypt(plaintext, Default::default())?;
-    
+
         let decryptedtext = private_key.decrypt(&ciphertext, Default::default())?;
-    
+
         assert_eq!(plaintext, &decryptedtext[..]);
         Ok(())
     }
@@ -22,11 +22,11 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
 
         let plaintext = b"Hello, World!";
-    
+
         let ciphertext = private_key.encrypt(plaintext, Default::default())?;
-    
+
         let decryptedtext = private_key.decrypt(&ciphertext, Default::default())?;
-    
+
         assert_eq!(plaintext, &decryptedtext[..]);
         Ok(())
     }
@@ -36,11 +36,11 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Secp256k1);
 
         let plaintext = b"Hello, World!";
-    
+
         let ciphertext = private_key.encrypt(plaintext, Default::default())?;
-    
+
         let decryptedtext = private_key.decrypt(&ciphertext, Default::default())?;
-    
+
         assert_eq!(plaintext, &decryptedtext[..]);
         Ok(())
     }
@@ -50,9 +50,9 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
 
         let plaintext = b"Hello, World!";
-    
+
         let signature = private_key.sign(plaintext)?;
-    
+
         assert!(private_key.verify(plaintext, &signature).is_ok());
         Ok(())
     }
@@ -62,13 +62,11 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Secp256k1);
 
         let plaintext = b"Hello, World!";
-        
+
         let signature = private_key.sign(plaintext)?;
-    
+
         assert!(private_key.verify(plaintext, &signature).is_ok());
-    
+
         Ok(())
     }
-
-
 }
