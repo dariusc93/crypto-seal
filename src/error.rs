@@ -39,4 +39,10 @@ pub enum Error {
     Base58EncodeError(#[from] bs58::encode::Error),
     #[error(transparent)]
     Base58DecodeError(#[from] bs58::decode::Error),
+    #[cfg(feature = "libp2p-identity")]
+    #[error(transparent)]
+    OtherVariantError(#[from] libp2p_identity::OtherVariantError),
+    #[cfg(feature = "libp2p-identity")]
+    #[error(transparent)]
+    DecodingError(#[from] libp2p_identity::DecodingError)
 }

@@ -25,7 +25,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 ed25519-dalek = { version = "2", features = ["serde"] }
 curve25519-dalek = "4"
 secp256k1 = { version = "0.28", features = ["rand-std", "serde"] }
-sha2 = "0.10"
+sha2 = "0.10.8"
 hmac = "0.12"
 aes-gcm = { version = "0.10", features = ["stream"] }
 anyhow = "1"
@@ -36,8 +36,11 @@ bs58 = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+libp2p-identity = { version = "0.2.8", optional = true, features = ["ed25519", "rand"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
 [features]
-default = []
+default = ["libp2p-identity"]
+libp2p-identity = ["dep:libp2p-identity"]

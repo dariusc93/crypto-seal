@@ -7,6 +7,7 @@ use aes_gcm::{
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{SecretKey, Signature, Signer, SigningKey, Verifier};
+use libp2p_identity::Keypair;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
@@ -24,6 +25,103 @@ pub enum PrivateKey {
     Ed25519(ed25519_dalek::SigningKey),
     Secp256k1(secp256k1::SecretKey),
     Aes256([u8; 32]),
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<PrivateKey> for libp2p_identity::Keypair {
+    type Error = Error;
+    fn try_from(pv: PrivateKey) -> std::result::Result<Self, Self::Error> {
+        libp2p_identity::Keypair::try_from(&pv)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<&PrivateKey> for libp2p_identity::Keypair {
+    type Error = Error;
+    fn try_from(pv: &PrivateKey) -> std::result::Result<Self, Self::Error> {
+        let ed25519_pk = match pv {
+            PrivateKey::Ed25519(key) => key,
+            _ => return Err(Error::Unsupported),
+        };
+        let mut bytes = *ed25519_pk.as_bytes();
+
+        Keypair::ed25519_from_bytes(&mut bytes).map_err(Error::DecodingError)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<PrivateKey> for libp2p_identity::ed25519::Keypair {
+    type Error = Error;
+    fn try_from(pv: PrivateKey) -> std::result::Result<Self, Self::Error> {
+        libp2p_identity::ed25519::Keypair::try_from(&pv)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<&PrivateKey> for libp2p_identity::ed25519::Keypair {
+    type Error = Error;
+    fn try_from(pv: &PrivateKey) -> std::result::Result<Self, Self::Error> {
+        let ed25519_pk = match pv {
+            PrivateKey::Ed25519(key) => key,
+            _ => return Err(Error::Unsupported),
+        };
+        let mut bytes = *ed25519_pk.as_bytes();
+        libp2p_identity::ed25519::Keypair::try_from_bytes(&mut bytes).map_err(Error::DecodingError)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<PrivateKey> for libp2p_identity::ed25519::SecretKey {
+    type Error = Error;
+    fn try_from(pv: PrivateKey) -> std::result::Result<Self, Self::Error> {
+        libp2p_identity::ed25519::SecretKey::try_from(&pv)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<&PrivateKey> for libp2p_identity::ed25519::SecretKey {
+    type Error = Error;
+    fn try_from(pv: &PrivateKey) -> std::result::Result<Self, Self::Error> {
+        let ed25519_pk = match pv {
+            PrivateKey::Ed25519(key) => key,
+            _ => return Err(Error::Unsupported),
+        };
+        let mut bytes = *ed25519_pk.as_bytes();
+        libp2p_identity::ed25519::SecretKey::try_from_bytes(&mut bytes)
+            .map_err(Error::DecodingError)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl From<libp2p_identity::ed25519::SecretKey> for PrivateKey {
+    fn from(secret: libp2p_identity::ed25519::SecretKey) -> Self {
+        let bytes: [u8; 32] = secret.as_ref().try_into().expect("Valid secret");
+        let secret = ed25519_dalek::SigningKey::from_bytes(&bytes);
+        PrivateKey::Ed25519(secret)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl From<libp2p_identity::ed25519::Keypair> for PrivateKey {
+    fn from(keypair: libp2p_identity::ed25519::Keypair) -> Self {
+        let bytes: [u8; 32] = keypair.secret().as_ref().try_into().expect("Valid secret");
+        let secret = ed25519_dalek::SigningKey::from_bytes(&bytes);
+        PrivateKey::Ed25519(secret)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<libp2p_identity::Keypair> for PrivateKey {
+    type Error = Error;
+    fn try_from(keypair: libp2p_identity::Keypair) -> std::result::Result<Self, Self::Error> {
+        match keypair.key_type() {
+            libp2p_identity::KeyType::Ed25519 => {
+                let ed25519_kp = keypair.try_into_ed25519()?;
+                Ok(ed25519_kp.into())
+            }
+            _ => Err(Error::Unsupported),
+        }
+    }
 }
 
 impl std::fmt::Debug for PrivateKey {
@@ -69,11 +167,44 @@ impl Drop for PrivateKey {
 
 /// Container of public keys
 /// The following is supported
-/// - [`ed25519_dalek::PublicKey`]
-#[derive(Clone, Copy, Eq)]
+/// - [`ed25519_dalek`]
+/// - [`secp256k1`]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::VerifyingKey),
     Secp256k1(secp256k1::PublicKey),
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<libp2p_identity::PublicKey> for PublicKey {
+    type Error = Error;
+    fn try_from(public_key: libp2p_identity::PublicKey) -> std::result::Result<Self, Self::Error> {
+        let key = match public_key.key_type() {
+            libp2p_identity::KeyType::Ed25519 => {
+                let k = public_key.try_into_ed25519()?;
+                k.to_bytes()
+            }
+            _ => return Err(Error::InvalidPublickey),
+        };
+
+        PublicKey::from_bytes(PublicKeyType::Ed25519, &key)
+    }
+}
+
+#[cfg(feature = "libp2p-identity")]
+impl TryFrom<PublicKey> for libp2p_identity::PublicKey {
+    type Error = Error;
+    fn try_from(public_key: PublicKey) -> std::result::Result<Self, Self::Error> {
+        match public_key {
+            PublicKey::Ed25519(public_key) => {
+                let bytes = public_key.as_bytes();
+                let public_key = libp2p_identity::ed25519::PublicKey::try_from_bytes(&bytes[..])?;
+                let pk: libp2p_identity::PublicKey = public_key.into();
+                Ok(pk)
+            }
+            PublicKey::Secp256k1(_) => Err(Error::InvalidPublickey),
+        }
+    }
 }
 
 impl std::fmt::Debug for PublicKey {
@@ -85,18 +216,6 @@ impl std::fmt::Debug for PublicKey {
 impl core::fmt::Display for PublicKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", bs58::encode(self.encode()).into_string())
-    }
-}
-
-impl Hash for PublicKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.encode().hash(state)
-    }
-}
-
-impl PartialEq for PublicKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.encode() == other.encode()
     }
 }
 
