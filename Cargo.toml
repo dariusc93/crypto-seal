@@ -42,5 +42,5 @@ libp2p-identity = { version = "0.2.8", optional = true, features = ["ed25519", "
 getrandom = { version = "0.2", features = ["js"] }
 
 [features]
-default = ["libp2p-identity"]
+default = []
 libp2p-identity = ["dep:libp2p-identity"]

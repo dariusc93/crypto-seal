@@ -7,7 +7,6 @@ use aes_gcm::{
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{SecretKey, Signature, Signer, SigningKey, Verifier};
-use libp2p_identity::Keypair;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
@@ -45,7 +44,7 @@ impl TryFrom<&PrivateKey> for libp2p_identity::Keypair {
         };
         let mut bytes = *ed25519_pk.as_bytes();
 
-        Keypair::ed25519_from_bytes(&mut bytes).map_err(Error::DecodingError)
+        libp2p_identity::Keypair::ed25519_from_bytes(&mut bytes).map_err(Error::DecodingError)
     }
 }
 
