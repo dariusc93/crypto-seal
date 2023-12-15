@@ -33,8 +33,8 @@ mod test {
         let my_data = String::from("Hello, World!");
         let (key, sealed_data) = my_data.seal()?;
 
-        let encoded_package = sealed_data.to_vec()?;
-        let decoded_package = Package::<String>::from_slice(encoded_package)?;
+        let encoded_package = sealed_data.to_bytes()?;
+        let decoded_package = Package::<String>::from_bytes(encoded_package)?;
 
         let unsealed_data = decoded_package.open(&key)?;
 
@@ -59,8 +59,8 @@ mod test {
                 .collect(),
         )?;
 
-        let encoded_package = sealed_for_many.to_vec()?;
-        let decoded_package = Package::<String>::from_slice(encoded_package)?;
+        let encoded_package = sealed_for_many.to_bytes()?;
+        let decoded_package = Package::<String>::from_bytes(encoded_package)?;
 
         for pk in &random_pk {
             let unsealed = decoded_package.open(pk)?;

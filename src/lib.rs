@@ -117,19 +117,11 @@ where
         }
     }
 
-    pub fn deserialize(data: &str) -> Result<Self> {
-        serde_json::from_str(data).map_err(Error::from)
-    }
-
-    pub fn serialize(&self) -> Result<String> {
-        serde_json::to_string(self).map_err(Error::from)
-    }
-
-    pub fn from_slice<A: AsRef<[u8]>>(data: A) -> Result<Self> {
+    pub fn from_bytes<A: AsRef<[u8]>>(data: A) -> Result<Self> {
         serde_json::from_slice(data.as_ref()).map_err(Error::from)
     }
 
-    pub fn to_vec(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
         serde_json::to_vec(self).map_err(Error::from)
     }
 }
