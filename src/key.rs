@@ -432,7 +432,7 @@ impl PublicKey {
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
             PublicKey::Ed25519(key) => {
-                if signature.len() != 34 {
+                if signature.len() != 64 {
                     return Err(Error::InvalidSignature);
                 }
                 let mut hasher: Sha512 = Sha512::new();
@@ -444,7 +444,7 @@ impl PublicKey {
             }
             PublicKey::Secp256k1(key) => {
                 let secp = secp256k1::Secp256k1::new();
-                let mut hasher: Sha512 = Sha512::new();
+                let mut hasher = sha2::Sha256::new();
                 io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
@@ -539,10 +539,10 @@ impl PrivateKey {
         let key = zeroize::Zeroizing::new(key);
         match key_type {
             PrivateKeyType::Ed25519 => {
-                let key: [u8; 64] = key.as_slice().try_into()?;
-                ed25519_dalek::SigningKey::from_keypair_bytes(&key)
-                    .map(PrivateKey::Ed25519)
-                    .map_err(Error::from)
+                let key: [u8; 32] = key.as_slice().try_into()?;
+                Ok(PrivateKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(
+                    &key,
+                )))
             }
             PrivateKeyType::Aes256 => key
                 .as_slice()
@@ -654,7 +654,7 @@ impl PrivateKey {
             }
             PrivateKey::Secp256k1(key) => {
                 let secp = secp256k1::Secp256k1::new();
-                let mut hasher: Sha512 = Sha512::new();
+                let mut hasher = sha2::Sha256::new();
                 io::copy(reader, &mut hasher)?;
                 let hash = hasher.finalize().to_vec();
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
@@ -742,6 +742,9 @@ impl PrivateKey {
     /// Decrypt the data using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn decrypt(&self, data: &[u8], pubkey: CarrierKeyType) -> Result<Vec<u8>> {
+        if data.len() < 12 {
+            return Err(Error::DecryptionError);
+        }
         let key = self.fetch_encryption_key(pubkey)?;
         let (nonce, data) = extract_data_slice(data, 12);
         let key = Key::<Aes256Gcm>::from_slice(&key);
