@@ -210,6 +210,44 @@ mod test {
     }
 
     #[test]
+    fn shared_open_with_sender() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithSharedKey;
+        use crypto_seal::ToSealWithSharedKey;
+        let alice = PrivateKey::new();
+        let bob = PrivateKey::new();
+        let sealed = String::from("Hello, Bob!").seal(&alice, vec![bob.public_key()?])?;
+        let opened = ToOpenWithSharedKey::open(&sealed, &bob, &alice.public_key()?)?;
+        assert_eq!(String::from("Hello, Bob!"), opened);
+        Ok(())
+    }
+
+    #[test]
+    fn shared_open_rejects_wrong_sender() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithSharedKey;
+        use crypto_seal::ToSealWithSharedKey;
+        let alice = PrivateKey::new();
+        let bob = PrivateKey::new();
+        let charlie = PrivateKey::new();
+        let sealed = String::from("Hello, Bob!").seal(&alice, vec![bob.public_key()?])?;
+        assert!(ToOpenWithSharedKey::open(&sealed, &bob, &charlie.public_key()?).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn tampered_ciphertext_fails_open() -> anyhow::Result<()> {
+        use crypto_seal::ToOpen;
+        use crypto_seal::ToSealWithKey;
+        let key = PrivateKey::new();
+        let sealed = String::from("secret").seal(&key)?;
+        let mut value: serde_json::Value = serde_json::from_slice(&sealed.to_bytes()?)?;
+        let byte = value["data"][0].as_u64().expect("ciphertext byte") as u8;
+        value["data"][0] = serde_json::json!(byte ^ 0xff);
+        let tampered = Package::<String>::from_bytes(serde_json::to_vec(&value)?)?;
+        assert!(tampered.open(&key).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn multiple_shared_package_secp256k1() -> anyhow::Result<()> {
         use crypto_seal::ToOpenWithPublicKey;
         use crypto_seal::ToSealRefWithSharedKey;

@@ -173,8 +173,8 @@ where
     fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(self)?;
-        package.signature = private_key.sign(&inner_data)?;
         package.data = private_key.encrypt(&inner_data, Default::default())?;
+        package.signature = private_key.sign(&package.data)?;
         if let Ok(public_key) = private_key.public_key() {
             package.public_key = Some(public_key)
         }
@@ -198,10 +198,10 @@ where
     fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
         let mut package = Package::default();
         let inner_data = serde_json::to_vec(self)?;
-        let sig = private_key.sign(&inner_data)?;
         let ptype = private_key.public_key()?.key_type();
         let key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
         let data = private_key.encrypt(&inner_data, key::CarrierKeyType::Direct { key })?;
+        let sig = private_key.sign(&data)?;
 
         package.data = data;
         package.signature = sig;
@@ -233,8 +233,8 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
+        key.verify(&self.data, &self.signature)?;
         let data = key.decrypt(&self.data, Default::default())?;
-        key.verify(&data, &self.signature)?;
         serde_json::from_slice(&data).map_err(Error::from)
     }
 }
@@ -251,10 +251,12 @@ where
 
         let pk = self.public_key.as_ref().ok_or(Error::InvalidPublickey)?;
 
+        pk.verify(&self.data, &self.signature)?;
+
         let enc_k = match &self.recipients {
-            RecipientCarrier::Bundle { public_keys } => {
-                public_keys.get(&own_pk).expect("recipient available")
-            }
+            RecipientCarrier::Bundle { public_keys } => public_keys
+                .get(&own_pk)
+                .ok_or(Error::RecipientsNotAvailable)?,
             _ => return Err(Error::RecipientsNotAvailable),
         };
 
@@ -267,8 +269,19 @@ where
             },
         )?;
 
-        pk.verify(&data, &self.signature)?;
-
         serde_json::from_slice(&data).map_err(Error::from)
+    }
+}
+
+impl<T> ToOpenWithSharedKey<T> for Package<T>
+where
+    T: DeserializeOwned,
+{
+    fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
+        match self.public_key {
+            Some(pk) if pk == *public_key => {}
+            _ => return Err(Error::InvalidPublickey),
+        }
+        ToOpenWithPublicKey::open(self, key)
     }
 }
