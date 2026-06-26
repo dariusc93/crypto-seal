@@ -234,6 +234,23 @@ mod test {
     }
 
     #[test]
+    fn shared_seal_hides_sender() -> anyhow::Result<()> {
+        use crypto_seal::ToSealWithSharedKey;
+        let alice = PrivateKey::new();
+        let bob = PrivateKey::new();
+        let sealed = String::from("Hello, Bob!").seal(&alice, vec![bob.public_key()?])?;
+        let bytes = sealed.to_bytes()?;
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains(&alice.public_key()?.to_string()));
+        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        assert_ne!(
+            value["public_key"].as_str().expect("ephemeral key"),
+            alice.public_key()?.to_string()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn tampered_ciphertext_fails_open() -> anyhow::Result<()> {
         use crypto_seal::ToOpen;
         use crypto_seal::ToSealWithKey;

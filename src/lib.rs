@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::Error;
-use crate::key::{PrivateKey, PublicKey};
+use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -84,11 +84,17 @@ pub trait ToOpenWithSharedKey<T> {
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T>;
 }
 
+#[derive(Deserialize, Serialize)]
+struct Signed {
+    data: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    public_key: Option<PublicKey>,
+    signature: Vec<u8>,
+}
+
 #[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct Package<T: ?Sized> {
     data: Vec<u8>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    signature: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     public_key: Option<PublicKey>,
     #[serde(default, skip_serializing_if = "RecipientCarrier::is_none")]
@@ -105,12 +111,9 @@ where
         data: Vec<u8>,
         public_key: Option<PublicKey>,
         recipients: RecipientCarrier,
-        signature: Option<Vec<u8>>,
     ) -> Self {
-        let signature = signature.unwrap_or_default();
         Self {
             data,
-            signature,
             public_key,
             recipients,
             marker: PhantomData,
@@ -172,12 +175,14 @@ where
 {
     fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
-        let inner_data = serde_json::to_vec(self)?;
-        package.data = private_key.encrypt(&inner_data, Default::default())?;
-        package.signature = private_key.sign(&package.data)?;
-        if let Ok(public_key) = private_key.public_key() {
-            package.public_key = Some(public_key)
-        }
+        let inner = serde_json::to_vec(self)?;
+        let signed = Signed {
+            signature: private_key.sign(&inner)?,
+            public_key: private_key.public_key().ok(),
+            data: inner,
+        };
+        let signed = serde_json::to_vec(&signed)?;
+        package.data = private_key.encrypt(&signed, Default::default())?;
         Ok(package)
     }
 }
@@ -197,23 +202,35 @@ where
 {
     fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
         let mut package = Package::default();
-        let inner_data = serde_json::to_vec(self)?;
-        let ptype = private_key.public_key()?.key_type();
-        let key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
-        let data = private_key.encrypt(&inner_data, key::CarrierKeyType::Direct { key })?;
-        let sig = private_key.sign(&data)?;
+        let sender = private_key.public_key()?;
+        let ptype = sender.key_type();
+
+        let inner = serde_json::to_vec(self)?;
+        let signed = Signed {
+            signature: private_key.sign(&inner)?,
+            public_key: Some(sender),
+            data: inner,
+        };
+        let signed = serde_json::to_vec(&signed)?;
+
+        let data_key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
+        let data = private_key.encrypt(&signed, key::CarrierKeyType::Direct { key: data_key })?;
+
+        let ephemeral = PrivateKey::new_with(match ptype {
+            PublicKeyType::Ed25519 => PrivateKeyType::Ed25519,
+            PublicKeyType::Secp256k1 => PrivateKeyType::Secp256k1,
+        });
 
         package.data = data;
-        package.signature = sig;
         package.recipients = RecipientCarrier::Bundle {
             public_keys: HashMap::from_iter(
                 public_key
                     .iter()
                     .filter(|public_key| public_key.key_type() == ptype)
                     .filter_map(|public_key| {
-                        private_key
+                        ephemeral
                             .encrypt(
-                                &key,
+                                &data_key,
                                 key::CarrierKeyType::Exchange {
                                     public_key: *public_key,
                                 },
@@ -223,7 +240,7 @@ where
                     }),
             ),
         };
-        package.public_key = Some(private_key.public_key()?);
+        package.public_key = Some(ephemeral.public_key()?);
         Ok(package)
     }
 }
@@ -233,25 +250,24 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey) -> Result<T> {
-        key.verify(&self.data, &self.signature)?;
-        let data = key.decrypt(&self.data, Default::default())?;
-        serde_json::from_slice(&data).map_err(Error::from)
+        let signed = key.decrypt(&self.data, Default::default())?;
+        let signed: Signed = serde_json::from_slice(&signed)?;
+        key.verify(&signed.data, &signed.signature)?;
+        serde_json::from_slice(&signed.data).map_err(Error::from)
     }
 }
 
-impl<T> ToOpenWithPublicKey<T> for Package<T>
+impl<T> Package<T>
 where
     T: DeserializeOwned,
 {
-    fn open(&self, key: &PrivateKey) -> Result<T> {
+    fn open_shared(&self, key: &PrivateKey, expect: Option<&PublicKey>) -> Result<T> {
         let own_pk = key.public_key()?;
         if !self.has_recipient(&own_pk) {
             return Err(Error::InvalidPublickey);
         }
 
-        let pk = self.public_key.as_ref().ok_or(Error::InvalidPublickey)?;
-
-        pk.verify(&self.data, &self.signature)?;
+        let ephemeral = self.public_key.as_ref().ok_or(Error::InvalidPublickey)?;
 
         let enc_k = match &self.recipients {
             RecipientCarrier::Bundle { public_keys } => public_keys
@@ -260,16 +276,39 @@ where
             _ => return Err(Error::RecipientsNotAvailable),
         };
 
-        let en_key = key.decrypt(enc_k, key::CarrierKeyType::Exchange { public_key: *pk })?;
-
-        let data = key.decrypt(
-            &self.data,
-            key::CarrierKeyType::Direct {
-                key: en_key.as_slice().try_into()?,
+        let data_key = key.decrypt(
+            enc_k,
+            key::CarrierKeyType::Exchange {
+                public_key: *ephemeral,
             },
         )?;
 
-        serde_json::from_slice(&data).map_err(Error::from)
+        let signed = key.decrypt(
+            &self.data,
+            key::CarrierKeyType::Direct {
+                key: data_key.as_slice().try_into()?,
+            },
+        )?;
+        let signed: Signed = serde_json::from_slice(&signed)?;
+
+        let sender = signed.public_key.ok_or(Error::InvalidPublickey)?;
+        if let Some(expect) = expect {
+            if sender != *expect {
+                return Err(Error::InvalidPublickey);
+            }
+        }
+        sender.verify(&signed.data, &signed.signature)?;
+
+        serde_json::from_slice(&signed.data).map_err(Error::from)
+    }
+}
+
+impl<T> ToOpenWithPublicKey<T> for Package<T>
+where
+    T: DeserializeOwned,
+{
+    fn open(&self, key: &PrivateKey) -> Result<T> {
+        self.open_shared(key, None)
     }
 }
 
@@ -278,10 +317,6 @@ where
     T: DeserializeOwned,
 {
     fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T> {
-        match self.public_key {
-            Some(pk) if pk == *public_key => {}
-            _ => return Err(Error::InvalidPublickey),
-        }
-        ToOpenWithPublicKey::open(self, key)
+        self.open_shared(key, Some(public_key))
     }
 }
