@@ -1,8 +1,8 @@
 use crate::error::Error;
 use crate::format::Format;
 use alloc::vec::Vec;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Postcard;

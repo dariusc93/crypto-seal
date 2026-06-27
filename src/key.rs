@@ -1,24 +1,24 @@
-use crate::{error::Error, Result};
-use alloc::string::String;
-use alloc::vec::Vec;
+use crate::{Result, error::Error};
 #[cfg(feature = "std")]
 use aes_gcm::aead::stream::{DecryptorBE32, EncryptorBE32};
 use aes_gcm::{
-    aead::{Aead, Payload},
     Aes256Gcm, Key, KeyInit, Nonce,
+    aead::{Aead, Payload},
 };
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{Signature, SigningKey};
-use signature::{Signer as _, Verifier as _};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
 use sha2::Sha256;
 use sha2::Sha512;
+use signature::{Signer as _, Verifier as _};
 #[cfg(feature = "std")]
 use std::io;
 use zeroize::{Zeroize, Zeroizing};
@@ -312,12 +312,12 @@ impl PublicKey {
                 Self::from_ed25519_bytes(&bytes)
             }
             PublicKeyType::Secp256k1 => Self::from_secp256k1_bytes(bytes),
-            PublicKeyType::P256 => Ok(PublicKey::P256(
-                p256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)?,
-            )),
-            PublicKeyType::P384 => Ok(PublicKey::P384(
-                p384::ecdsa::VerifyingKey::from_sec1_bytes(bytes)?,
-            )),
+            PublicKeyType::P256 => Ok(PublicKey::P256(p256::ecdsa::VerifyingKey::from_sec1_bytes(
+                bytes,
+            )?)),
+            PublicKeyType::P384 => Ok(PublicKey::P384(p384::ecdsa::VerifyingKey::from_sec1_bytes(
+                bytes,
+            )?)),
         }
     }
 
@@ -347,7 +347,9 @@ impl PublicKey {
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             PublicKey::Ed25519(public_key) => public_key.to_bytes().to_vec(),
-            PublicKey::Secp256k1(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
+            PublicKey::Secp256k1(public_key) => {
+                public_key.to_encoded_point(true).as_bytes().to_vec()
+            }
             PublicKey::P256(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
             PublicKey::P384(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
         }
@@ -826,8 +828,11 @@ impl PrivateKey {
                 PrivateKey::Aes256(key) => Ok(Zeroizing::new(key.to_vec())),
                 PrivateKey::Secp256k1(sk) => {
                     let peer: k256::ecdsa::VerifyingKey = public_key.try_into()?;
-                    let shared = k256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
-                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                    let shared =
+                        k256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
+                    Ok(Zeroizing::new(
+                        shared.raw_secret_bytes().as_slice().to_vec(),
+                    ))
                 }
                 PrivateKey::Ed25519(_) => {
                     let static_key: x25519_dalek::StaticSecret = self.try_into()?;
@@ -838,13 +843,19 @@ impl PrivateKey {
                 }
                 PrivateKey::P256(sk) => {
                     let peer: p256::ecdsa::VerifyingKey = public_key.try_into()?;
-                    let shared = p256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
-                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                    let shared =
+                        p256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
+                    Ok(Zeroizing::new(
+                        shared.raw_secret_bytes().as_slice().to_vec(),
+                    ))
                 }
                 PrivateKey::P384(sk) => {
                     let peer: p384::ecdsa::VerifyingKey = public_key.try_into()?;
-                    let shared = p384::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
-                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                    let shared =
+                        p384::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
+                    Ok(Zeroizing::new(
+                        shared.raw_secret_bytes().as_slice().to_vec(),
+                    ))
                 }
             },
             CarrierKeyType::None => match self {
@@ -854,7 +865,9 @@ impl PrivateKey {
                         sk.as_nonzero_scalar(),
                         sk.verifying_key().as_affine(),
                     );
-                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                    Ok(Zeroizing::new(
+                        shared.raw_secret_bytes().as_slice().to_vec(),
+                    ))
                 }
                 PrivateKey::Ed25519(_) => {
                     let static_key: x25519_dalek::StaticSecret = self.try_into()?;
@@ -864,14 +877,22 @@ impl PrivateKey {
                     Ok(Zeroizing::new(enc_key.as_bytes().to_vec()))
                 }
                 PrivateKey::P256(sk) => {
-                    let shared =
-                        p256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), sk.verifying_key().as_affine());
-                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                    let shared = p256::ecdh::diffie_hellman(
+                        sk.as_nonzero_scalar(),
+                        sk.verifying_key().as_affine(),
+                    );
+                    Ok(Zeroizing::new(
+                        shared.raw_secret_bytes().as_slice().to_vec(),
+                    ))
                 }
                 PrivateKey::P384(sk) => {
-                    let shared =
-                        p384::ecdh::diffie_hellman(sk.as_nonzero_scalar(), sk.verifying_key().as_affine());
-                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                    let shared = p384::ecdh::diffie_hellman(
+                        sk.as_nonzero_scalar(),
+                        sk.verifying_key().as_affine(),
+                    );
+                    Ok(Zeroizing::new(
+                        shared.raw_secret_bytes().as_slice().to_vec(),
+                    ))
                 }
             },
         }

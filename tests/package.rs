@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod test {
-    use crypto_seal::key::PrivateKey;
-    use crypto_seal::key::PrivateKeyType;
     use crypto_seal::Package;
     use crypto_seal::Seal;
+    use crypto_seal::key::PrivateKey;
+    use crypto_seal::key::PrivateKeyType;
 
     #[test]
     fn default_package() -> anyhow::Result<()> {
@@ -205,16 +205,14 @@ mod test {
     #[cfg(feature = "json")]
     #[test]
     fn shared_recipient_tampering_fails_open() -> anyhow::Result<()> {
-        use crypto_seal::format::{json::Json, Format};
+        use crypto_seal::format::{Format, json::Json};
         let alice = PrivateKey::new();
         let bob = PrivateKey::new();
         let john = PrivateKey::new();
         let sealed = String::from("Hello!")
             .seal_shared(&alice, vec![bob.public_key()?, john.public_key()?])?;
         let mut value: serde_json::Value = serde_json::from_slice(&Json::serialize(&sealed)?)?;
-        let bundle = value["recipients"]
-            .as_object_mut()
-            .expect("recipients");
+        let bundle = value["recipients"].as_object_mut().expect("recipients");
         bundle.remove(&john.public_key()?.to_string());
         let bytes = serde_json::to_vec(&value)?;
         let tampered: Package<String> = Json::deserialize(&bytes)?;
@@ -225,7 +223,7 @@ mod test {
     #[cfg(feature = "json")]
     #[test]
     fn tampered_ciphertext_fails_open() -> anyhow::Result<()> {
-        use crypto_seal::format::{json::Json, Format};
+        use crypto_seal::format::{Format, json::Json};
         let key = PrivateKey::new();
         let sealed = String::from("secret").seal_with(&key)?;
         let mut value: serde_json::Value = serde_json::from_slice(&Json::serialize(&sealed)?)?;
@@ -240,7 +238,7 @@ mod test {
     #[cfg(feature = "json")]
     #[test]
     fn json_roundtrip() -> anyhow::Result<()> {
-        use crypto_seal::format::{json::Json, Format};
+        use crypto_seal::format::{Format, json::Json};
         let (key, sealed) = String::from("Hello, World!").seal()?;
         let bytes = Json::serialize(&sealed)?;
         let decoded: Package<String> = Json::deserialize(&bytes)?;
@@ -251,7 +249,7 @@ mod test {
     #[cfg(feature = "json")]
     #[test]
     fn cross_format_mismatch_fails() -> anyhow::Result<()> {
-        use crypto_seal::format::{json::Json, Format};
+        use crypto_seal::format::{Format, json::Json};
         let (key, sealed) = String::from("Hello, World!").seal()?;
         let postcard_bytes = sealed.to_bytes()?;
         let json_bytes = Json::serialize(&sealed)?;
@@ -314,8 +312,10 @@ mod test {
         let bob_pk = PrivateKey::new_with(PrivateKeyType::P384);
 
         let message = String::from("Hello Everyone!");
-        let sealed_for_many =
-            message.seal_shared(&alice_pk, vec![alice_pk.public_key()?, bob_pk.public_key()?])?;
+        let sealed_for_many = message.seal_shared(
+            &alice_pk,
+            vec![alice_pk.public_key()?, bob_pk.public_key()?],
+        )?;
 
         assert_eq!(message, sealed_for_many.open(&alice_pk)?);
         assert_eq!(message, sealed_for_many.open(&bob_pk)?);

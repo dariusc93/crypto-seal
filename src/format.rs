@@ -5,8 +5,8 @@ pub mod postcard;
 pub mod json;
 
 use alloc::vec::Vec;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 pub trait Format {
     fn serialize<T: Serialize + ?Sized>(value: &T) -> crate::Result<Vec<u8>>;

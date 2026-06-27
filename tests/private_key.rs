@@ -196,9 +196,11 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
         let data = b"Hello, World!";
         let signature = private_key.sign_reader(&mut &data[..])?;
-        assert!(private_key
-            .verify_reader(&mut &data[..], &signature)
-            .is_ok());
+        assert!(
+            private_key
+                .verify_reader(&mut &data[..], &signature)
+                .is_ok()
+        );
         Ok(())
     }
 
@@ -207,9 +209,11 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Secp256k1);
         let data = b"Hello, World!";
         let signature = private_key.sign_reader(&mut &data[..])?;
-        assert!(private_key
-            .verify_reader(&mut &data[..], &signature)
-            .is_ok());
+        assert!(
+            private_key
+                .verify_reader(&mut &data[..], &signature)
+                .is_ok()
+        );
         Ok(())
     }
 }

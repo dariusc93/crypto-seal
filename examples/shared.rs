@@ -1,4 +1,4 @@
-use crypto_seal::{error::Error, key::PrivateKey, Package, Seal};
+use crypto_seal::{Package, Seal, error::Error, key::PrivateKey};
 
 fn main() -> Result<(), Error> {
     let alice = PrivateKey::new();

@@ -1,4 +1,4 @@
-use crypto_seal::{error::Error, Seal};
+use crypto_seal::{Seal, error::Error};
 
 fn main() -> Result<(), Error> {
     let my_data = String::from("Hello, World!");

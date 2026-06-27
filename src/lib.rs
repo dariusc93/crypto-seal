@@ -10,11 +10,11 @@ pub mod key;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::error::Error;
-use crate::format::postcard::Postcard;
 use crate::format::Format;
+use crate::format::postcard::Postcard;
 use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
 pub type Result<T> = core::result::Result<T, Error>;
