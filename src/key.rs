@@ -1,6 +1,9 @@
 use crate::{error::Error, Result};
+use alloc::string::String;
+use alloc::vec::Vec;
+#[cfg(feature = "std")]
+use aes_gcm::aead::stream::{DecryptorBE32, EncryptorBE32};
 use aes_gcm::{
-    aead::stream::{DecryptorBE32, EncryptorBE32},
     aead::{Aead, Payload},
     Aes256Gcm, Key, KeyInit, Nonce,
 };
@@ -16,6 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
 use sha2::Sha256;
 use sha2::Sha512;
+#[cfg(feature = "std")]
 use std::io;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -39,8 +43,8 @@ pub enum PrivateKey {
     Aes256([u8; 32]),
 }
 
-impl std::fmt::Debug for PrivateKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let ty = match self {
             PrivateKey::Ed25519(_) => "ed25519",
             PrivateKey::Secp256k1(_) => "secp256k1",
@@ -119,8 +123,20 @@ impl Hash for PublicKey {
     }
 }
 
-impl std::fmt::Debug for PublicKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl PartialOrd for PublicKey {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PublicKey {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.encode().cmp(&other.encode())
+    }
+}
+
+impl core::fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self)
     }
 }
@@ -132,7 +148,7 @@ impl core::fmt::Display for PublicKey {
 }
 
 impl Serialize for PublicKey {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -142,7 +158,7 @@ impl Serialize for PublicKey {
 }
 
 impl<'d> Deserialize<'d> for PublicKey {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
     where
         D: Deserializer<'d>,
     {
@@ -171,7 +187,7 @@ pub enum PublicKeyType {
 
 impl TryFrom<u8> for PublicKeyType {
     type Error = Error;
-    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: u8) -> core::result::Result<Self, Self::Error> {
         match value {
             0xa1 => Ok(PublicKeyType::Ed25519),
             0xb1 => Ok(PublicKeyType::Secp256k1),
@@ -202,7 +218,7 @@ impl From<ed25519_dalek::VerifyingKey> for PublicKey {
 impl TryFrom<PublicKey> for k256::ecdsa::VerifyingKey {
     type Error = Error;
 
-    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: PublicKey) -> core::result::Result<Self, Self::Error> {
         match value {
             PublicKey::Secp256k1(pk) => Ok(pk),
             _ => Err(Error::InvalidPublicKey),
@@ -213,7 +229,7 @@ impl TryFrom<PublicKey> for k256::ecdsa::VerifyingKey {
 impl TryFrom<PublicKey> for p256::ecdsa::VerifyingKey {
     type Error = Error;
 
-    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: PublicKey) -> core::result::Result<Self, Self::Error> {
         match value {
             PublicKey::P256(pk) => Ok(pk),
             _ => Err(Error::InvalidPublicKey),
@@ -224,7 +240,7 @@ impl TryFrom<PublicKey> for p256::ecdsa::VerifyingKey {
 impl TryFrom<PublicKey> for p384::ecdsa::VerifyingKey {
     type Error = Error;
 
-    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: PublicKey) -> core::result::Result<Self, Self::Error> {
         match value {
             PublicKey::P384(pk) => Ok(pk),
             _ => Err(Error::InvalidPublicKey),
@@ -235,7 +251,7 @@ impl TryFrom<PublicKey> for p384::ecdsa::VerifyingKey {
 impl TryFrom<&PrivateKey> for x25519_dalek::StaticSecret {
     type Error = Error;
 
-    fn try_from(value: &PrivateKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: &PrivateKey) -> core::result::Result<Self, Self::Error> {
         match value {
             PrivateKey::Ed25519(kp) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -255,7 +271,7 @@ impl TryFrom<&PrivateKey> for x25519_dalek::StaticSecret {
 impl TryFrom<PrivateKey> for x25519_dalek::StaticSecret {
     type Error = Error;
 
-    fn try_from(value: PrivateKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: PrivateKey) -> core::result::Result<Self, Self::Error> {
         TryFrom::try_from(&value)
     }
 }
@@ -263,7 +279,7 @@ impl TryFrom<PrivateKey> for x25519_dalek::StaticSecret {
 impl TryFrom<PublicKey> for ed25519_dalek::VerifyingKey {
     type Error = Error;
 
-    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: PublicKey) -> core::result::Result<Self, Self::Error> {
         match value {
             PublicKey::Ed25519(pk) => Ok(pk),
             _ => Err(Error::InvalidPublicKey),
@@ -274,7 +290,7 @@ impl TryFrom<PublicKey> for ed25519_dalek::VerifyingKey {
 impl TryFrom<PublicKey> for x25519_dalek::PublicKey {
     type Error = Error;
 
-    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: PublicKey) -> core::result::Result<Self, Self::Error> {
         match value {
             PublicKey::Ed25519(pk) => {
                 let ep = CompressedEdwardsY(pk.to_bytes())
@@ -321,7 +337,8 @@ impl PublicKey {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut data = vec![self.key_type().into()];
+        let mut data = Vec::new();
+        data.push(self.key_type().into());
         data.extend(self.to_bytes());
         data
     }
@@ -374,6 +391,8 @@ impl PublicKey {
     }
 }
 
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl PublicKey {
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
@@ -402,17 +421,20 @@ pub enum PrivateKeyType {
     P384,
 }
 
+#[cfg(feature = "std")]
 const WRITE_BUFFER_SIZE: usize = 512;
+#[cfg(feature = "std")]
 const READ_BUFFER_SIZE: usize = 528;
 const NONCE_LEN: usize = 12;
 const SALT_LEN: usize = 16;
 const ENCRYPT_INFO: &[u8] = b"crypto-seal:aes256-gcm:v1";
+#[cfg(feature = "std")]
 const ENCRYPT_STREAM_INFO: &[u8] = b"crypto-seal:aes256-gcm-stream:v1";
 const MAC_INFO: &[u8] = b"crypto-seal:hmac-sha256:v1";
 
 impl TryFrom<u8> for PrivateKeyType {
     type Error = Error;
-    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: u8) -> core::result::Result<Self, Self::Error> {
         match value {
             0xa1 => Ok(PrivateKeyType::Ed25519),
             0xb1 => Ok(PrivateKeyType::Secp256k1),
@@ -507,7 +529,8 @@ impl PrivateKey {
 
     /// Exports the key out with an identifier
     pub fn encode(&self) -> Vec<u8> {
-        let mut data = vec![self.key_type().into()];
+        let mut data = Vec::new();
+        data.push(self.key_type().into());
         data.extend(self.to_bytes());
         data
     }
@@ -567,6 +590,8 @@ impl PrivateKey {
     }
 
     /// Sign the data from [`std::io::Read`] using [`PrivateKey`]
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn sign_reader(&self, reader: &mut impl io::Read) -> Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(key) => {
@@ -611,6 +636,8 @@ impl PrivateKey {
     }
 
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
             PrivateKey::Aes256(key) => {
@@ -715,6 +742,8 @@ impl PrivateKey {
 impl PrivateKey {
     /// Encrypt the data stream from [`std::io::Read`] to [`std::io::Write`] using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn encrypt_stream(
         &self,
         reader: &mut impl io::Read,
@@ -751,6 +780,8 @@ impl PrivateKey {
 
     /// Decrypt the data stream from [`std::io::Read`] to [`std::io::Write`] using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn decrypt_stream(
         &self,
         reader: &mut impl io::Read,
@@ -847,6 +878,7 @@ impl PrivateKey {
     }
 }
 
+#[cfg(feature = "std")]
 fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buffer.len() {

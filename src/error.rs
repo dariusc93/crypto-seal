@@ -1,5 +1,6 @@
+use core::array::TryFromSliceError;
 use ed25519_dalek::SignatureError;
-use std::array::TryFromSliceError;
+#[cfg(feature = "std")]
 use std::io;
 use thiserror::Error;
 
@@ -25,15 +26,29 @@ pub enum Error {
     RecipientsNotAvailable,
     #[error("Unable to convert slice: {0}")]
     InvalidLength(#[from] TryFromSliceError),
-    #[error(transparent)]
-    SignatureError(#[from] SignatureError),
+    #[error("{0}")]
+    SignatureError(SignatureError),
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     #[error(transparent)]
     IoError(#[from] io::Error),
     #[cfg(feature = "json")]
-    #[error(transparent)]
-    SerdeJsonError(#[from] serde_json::Error),
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
+    #[error("{0}")]
+    SerdeJsonError(serde_json::Error),
     #[error(transparent)]
     PostcardError(#[from] postcard::Error),
-    #[error(transparent)]
-    Base58DecodeError(#[from] bs58::decode::Error),
+}
+
+impl From<SignatureError> for Error {
+    fn from(value: SignatureError) -> Self {
+        Error::SignatureError(value)
+    }
+}
+
+#[cfg(feature = "json")]
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
+        Error::SerdeJsonError(value)
+    }
 }

@@ -1,21 +1,25 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 pub mod error;
 pub mod format;
 pub mod key;
 
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::format::postcard::Postcard;
 use crate::format::Format;
 use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
-fn recipients_aad(ephemeral: &PublicKey, recipients: &HashMap<PublicKey, Vec<u8>>) -> Vec<u8> {
+fn recipients_aad(ephemeral: &PublicKey, recipients: &BTreeMap<PublicKey, Vec<u8>>) -> Vec<u8> {
     let mut entries = recipients
         .iter()
         .map(|(public_key, wrapped)| (public_key.encode(), wrapped))
@@ -66,7 +70,7 @@ struct Signed {
 pub struct Package<T, F = Postcard> {
     data: Vec<u8>,
     public_key: Option<PublicKey>,
-    recipients: HashMap<PublicKey, Vec<u8>>,
+    recipients: BTreeMap<PublicKey, Vec<u8>>,
     #[serde(skip)]
     marker0: PhantomData<T>,
     #[serde(skip)]
@@ -78,7 +82,7 @@ impl<T, F> Default for Package<T, F> {
         Self {
             data: Vec::new(),
             public_key: None,
-            recipients: HashMap::new(),
+            recipients: BTreeMap::new(),
             marker0: PhantomData,
             marker1: PhantomData,
         }
@@ -89,7 +93,7 @@ impl<T, F> Package<T, F> {
     pub fn import(
         data: Vec<u8>,
         public_key: Option<PublicKey>,
-        recipients: HashMap<PublicKey, Vec<u8>>,
+        recipients: BTreeMap<PublicKey, Vec<u8>>,
     ) -> Self {
         Self {
             data,
@@ -175,7 +179,7 @@ where
         });
         let ephemeral_pub = ephemeral.public_key()?;
 
-        let mut public_keys = HashMap::new();
+        let mut public_keys = BTreeMap::new();
         for recipient in &recipients {
             if recipient.key_type() != ptype {
                 return Err(Error::InvalidPublicKey);

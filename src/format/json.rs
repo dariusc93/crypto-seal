@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::format::Format;
+use alloc::vec::Vec;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

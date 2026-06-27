@@ -4,6 +4,7 @@ pub mod postcard;
 #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
 pub mod json;
 
+use alloc::vec::Vec;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
