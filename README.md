@@ -6,7 +6,7 @@ crypto-seal is a small utility designed to securely "package" or seal serde-comp
 
 ## Usage
 
-*Note: ED25519 is used by default for encryption and signing. If AES256-GCM is used, signing will only supply an encrypted SHA512 hash using the key. This will be replaced in the future as this may not be a desirable option*
+*Note: ED25519 is the default key type. With the AES-256 key type, signing uses HMAC-SHA256 (with a MAC key derived separately from the encryption key), which is a symmetric authenticator and is not publicly verifiable like the ED25519/secp256k1 signatures.*
 
 ```rust
 use crypto_seal::{Seal, error::Error};
