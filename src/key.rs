@@ -10,6 +10,7 @@ use ed25519_dalek::{SecretKey, Signature, Signer, SigningKey, Verifier};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
 use sha2::Sha256;
@@ -299,7 +300,7 @@ impl TryFrom<&PrivateKey> for x25519_dalek::StaticSecret {
             PrivateKey::Ed25519(kp) => {
                 let mut hasher: Sha512 = Sha512::new();
                 hasher.update(kp.as_bytes());
-                let hash = hasher.finalize().to_vec();
+                let hash = hasher.finalize();
                 let mut new_sk: [u8; 32] = [0; 32];
                 new_sk.copy_from_slice(&hash[..32]);
                 let sk = x25519_dalek::StaticSecret::from(new_sk);
@@ -409,7 +410,7 @@ impl PublicKey {
 
                 let mut hasher = sha2::Sha256::new();
                 hasher.update(data);
-                let hash = hasher.finalize().to_vec();
+                let hash = hasher.finalize();
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
 
                 let sig = secp256k1::ecdsa::Signature::from_compact(signature)?;
@@ -433,7 +434,7 @@ impl PublicKey {
                 let secp = secp256k1::Secp256k1::new();
                 let mut hasher = sha2::Sha256::new();
                 io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize().to_vec();
+                let hash = hasher.finalize();
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
 
                 let sig = secp256k1::ecdsa::Signature::from_compact(signature)?;
@@ -497,17 +498,9 @@ impl PrivateKey {
     pub fn new_with(key_type: PrivateKeyType) -> Self {
         match key_type {
             PrivateKeyType::Ed25519 => {
-                #[inline]
-                pub fn generate<R: rand::CryptoRng + rand::RngCore + ?Sized>(
-                    csprng: &mut R,
-                ) -> SigningKey {
-                    let mut secret = SecretKey::default();
-                    csprng.fill_bytes(&mut secret);
-                    SigningKey::from_bytes(&secret)
-                }
-                let mut csprng = OsRng {};
-                let key = generate(&mut csprng);
-                PrivateKey::Ed25519(key)
+                let mut secret = SecretKey::default();
+                OsRng.fill_bytes(&mut secret);
+                PrivateKey::Ed25519(SigningKey::from_bytes(&secret))
             }
             PrivateKeyType::Aes256 => {
                 let key_sized = generate::<32>();
@@ -608,7 +601,7 @@ impl PrivateKey {
                 let secp = secp256k1::Secp256k1::new();
                 let mut hasher = sha2::Sha256::new();
                 hasher.update(data);
-                let hash = hasher.finalize().to_vec();
+                let hash = hasher.finalize();
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
                 Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
             }
@@ -642,7 +635,7 @@ impl PrivateKey {
                 let secp = secp256k1::Secp256k1::new();
                 let mut hasher = sha2::Sha256::new();
                 io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize().to_vec();
+                let hash = hasher.finalize();
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
                 Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
             }
@@ -909,7 +902,6 @@ fn derive_key(ikm: &[u8], salt: &[u8], info: &[u8]) -> Result<Zeroizing<[u8; 32]
 
 /// Used to generate random amount of data and store it in a Vec with a specific capacity
 pub(crate) fn generate<const N: usize>() -> [u8; N] {
-    use rand::RngCore;
     let mut buffer: [u8; N] = [0u8; N];
     OsRng.fill_bytes(&mut buffer);
     buffer
