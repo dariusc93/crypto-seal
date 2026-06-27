@@ -24,6 +24,26 @@ fn main() -> Result<(), Error> {
 }
 ```
 
+### Sharing with recipients
+
+```rust
+use crypto_seal::{Seal, Package, key::PrivateKey, error::Error};
+
+fn main() -> Result<(), Error> {
+    let alice = PrivateKey::new();
+    let bob = PrivateKey::new();
+
+    let sealed = String::from("Hello, Bob!").seal_shared(&alice, vec![bob.public_key()?])?;
+    let bytes = sealed.to_bytes()?;
+
+    let received = Package::<String>::from_bytes(bytes)?;
+    let message = received.open_shared(&bob, &alice.public_key()?)?;
+
+    assert_eq!(String::from("Hello, Bob!"), message);
+    Ok(())
+}
+```
+
 ## MSRV
 
 The minimum supported rust version is 1.74, which can be changed in the future. There is no guarantee that this library will work on older versions of rust.
