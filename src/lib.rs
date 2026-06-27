@@ -170,6 +170,8 @@ where
         let ephemeral = PrivateKey::new_with(match ptype {
             PublicKeyType::Ed25519 => PrivateKeyType::Ed25519,
             PublicKeyType::Secp256k1 => PrivateKeyType::Secp256k1,
+            PublicKeyType::P256 => PrivateKeyType::P256,
+            PublicKeyType::P384 => PrivateKeyType::P384,
         });
         let ephemeral_pub = ephemeral.public_key()?;
 

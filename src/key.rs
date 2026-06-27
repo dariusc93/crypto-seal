@@ -6,7 +6,8 @@ use aes_gcm::{
 };
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
-use ed25519_dalek::{SecretKey, Signature, Signer, SigningKey, Verifier};
+use ed25519_dalek::{SecretKey, Signature, SigningKey};
+use p256::ecdsa::signature::{Signer as _, Verifier as _};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use rand::rngs::OsRng;
@@ -29,6 +30,8 @@ type HmacSha256 = Hmac<Sha256>;
 pub enum PrivateKey {
     Ed25519(ed25519_dalek::SigningKey),
     Secp256k1(secp256k1::SecretKey),
+    P256(p256::ecdsa::SigningKey),
+    P384(p384::ecdsa::SigningKey),
     Aes256([u8; 32]),
 }
 
@@ -37,6 +40,8 @@ impl std::fmt::Debug for PrivateKey {
         let ty = match self {
             PrivateKey::Ed25519(_) => "ed25519",
             PrivateKey::Secp256k1(_) => "secp256k1",
+            PrivateKey::P256(_) => "p256",
+            PrivateKey::P384(_) => "p384",
             PrivateKey::Aes256(_) => "aes256",
         };
 
@@ -55,6 +60,8 @@ impl Zeroize for PrivateKey {
         match self {
             PrivateKey::Ed25519(key) => *key = SigningKey::from_bytes(&[0u8; 32]),
             PrivateKey::Secp256k1(key) => key.non_secure_erase(),
+            PrivateKey::P256(key) => *key = p256::ecdsa::SigningKey::random(&mut OsRng),
+            PrivateKey::P384(key) => *key = p384::ecdsa::SigningKey::random(&mut OsRng),
             PrivateKey::Aes256(key) => key.zeroize(),
         }
     }
@@ -70,10 +77,26 @@ impl Drop for PrivateKey {
 /// The following is supported
 /// - [`ed25519_dalek`]
 /// - [`secp256k1`]
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::VerifyingKey),
     Secp256k1(secp256k1::PublicKey),
+    P256(p256::ecdsa::VerifyingKey),
+    P384(p384::ecdsa::VerifyingKey),
+}
+
+impl PartialEq for PublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.encode() == other.encode()
+    }
+}
+
+impl Eq for PublicKey {}
+
+impl Hash for PublicKey {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.encode().hash(state);
+    }
 }
 
 impl std::fmt::Debug for PublicKey {
@@ -118,6 +141,12 @@ pub enum PublicKeyType {
 
     /// Secp256k1 Public Key
     Secp256k1,
+
+    /// NIST P-256 Public Key
+    P256,
+
+    /// NIST P-384 Public Key
+    P384,
 }
 
 impl TryFrom<u8> for PublicKeyType {
@@ -126,6 +155,8 @@ impl TryFrom<u8> for PublicKeyType {
         match value {
             0xa1 => Ok(PublicKeyType::Ed25519),
             0xb1 => Ok(PublicKeyType::Secp256k1),
+            0xd1 => Ok(PublicKeyType::P256),
+            0xe1 => Ok(PublicKeyType::P384),
             _ => Err(Error::InvalidPublicKey),
         }
     }
@@ -136,6 +167,8 @@ impl From<PublicKeyType> for u8 {
         match value {
             PublicKeyType::Ed25519 => 0xa1,
             PublicKeyType::Secp256k1 => 0xb1,
+            PublicKeyType::P256 => 0xd1,
+            PublicKeyType::P384 => 0xe1,
         }
     }
 }
@@ -158,7 +191,29 @@ impl TryFrom<PublicKey> for secp256k1::PublicKey {
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
         match value {
             PublicKey::Secp256k1(pk) => Ok(pk),
-            PublicKey::Ed25519(_) => Err(Error::InvalidPublicKey),
+            _ => Err(Error::InvalidPublicKey),
+        }
+    }
+}
+
+impl TryFrom<PublicKey> for p256::ecdsa::VerifyingKey {
+    type Error = Error;
+
+    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+        match value {
+            PublicKey::P256(pk) => Ok(pk),
+            _ => Err(Error::InvalidPublicKey),
+        }
+    }
+}
+
+impl TryFrom<PublicKey> for p384::ecdsa::VerifyingKey {
+    type Error = Error;
+
+    fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
+        match value {
+            PublicKey::P384(pk) => Ok(pk),
+            _ => Err(Error::InvalidPublicKey),
         }
     }
 }
@@ -196,8 +251,8 @@ impl TryFrom<PublicKey> for ed25519_dalek::VerifyingKey {
 
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
         match value {
-            PublicKey::Secp256k1(_) => Err(Error::InvalidPublicKey),
             PublicKey::Ed25519(pk) => Ok(pk),
+            _ => Err(Error::InvalidPublicKey),
         }
     }
 }
@@ -207,7 +262,6 @@ impl TryFrom<PublicKey> for x25519_dalek::PublicKey {
 
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
         match value {
-            PublicKey::Secp256k1(_) => Err(Error::InvalidPublicKey),
             PublicKey::Ed25519(pk) => {
                 let ep = CompressedEdwardsY(pk.to_bytes())
                     .decompress()
@@ -215,6 +269,7 @@ impl TryFrom<PublicKey> for x25519_dalek::PublicKey {
                 let mon = ep.to_montgomery();
                 Ok(x25519_dalek::PublicKey::from(mon.0))
             }
+            _ => Err(Error::InvalidPublicKey),
         }
     }
 }
@@ -227,6 +282,12 @@ impl PublicKey {
                 Self::from_ed25519_bytes(&bytes)
             }
             PublicKeyType::Secp256k1 => Self::from_secp256k1_bytes(bytes),
+            PublicKeyType::P256 => Ok(PublicKey::P256(
+                p256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)?,
+            )),
+            PublicKeyType::P384 => Ok(PublicKey::P384(
+                p384::ecdsa::VerifyingKey::from_sec1_bytes(bytes)?,
+            )),
         }
     }
 
@@ -256,6 +317,8 @@ impl PublicKey {
         match self {
             PublicKey::Ed25519(public_key) => public_key.to_bytes().to_vec(),
             PublicKey::Secp256k1(public_key) => public_key.serialize().to_vec(),
+            PublicKey::P256(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
+            PublicKey::P384(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
         }
     }
 
@@ -263,6 +326,8 @@ impl PublicKey {
         match self {
             PublicKey::Ed25519(_) => PublicKeyType::Ed25519,
             PublicKey::Secp256k1(_) => PublicKeyType::Secp256k1,
+            PublicKey::P256(_) => PublicKeyType::P256,
+            PublicKey::P384(_) => PublicKeyType::P384,
         }
     }
 }
@@ -288,6 +353,16 @@ impl PublicKey {
                 secp.verify_ecdsa(&msg, &sig, pubkey)?;
                 Ok(())
             }
+            PublicKey::P256(pubkey) => {
+                let sig = p256::ecdsa::Signature::from_slice(signature)?;
+                pubkey.verify(data, &sig)?;
+                Ok(())
+            }
+            PublicKey::P384(pubkey) => {
+                let sig = p384::ecdsa::Signature::from_slice(signature)?;
+                pubkey.verify(data, &sig)?;
+                Ok(())
+            }
         }
     }
 }
@@ -296,7 +371,7 @@ impl PublicKey {
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
-            PublicKey::Ed25519(_) => {
+            PublicKey::Ed25519(_) | PublicKey::P256(_) | PublicKey::P384(_) => {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
                 self.verify(&data, signature)
@@ -327,6 +402,12 @@ pub enum PrivateKeyType {
 
     /// Secp256k1 Private Key
     Secp256k1,
+
+    /// NIST P-256 Private Key
+    P256,
+
+    /// NIST P-384 Private Key
+    P384,
 }
 
 const WRITE_BUFFER_SIZE: usize = 512;
@@ -344,6 +425,8 @@ impl TryFrom<u8> for PrivateKeyType {
             0xa1 => Ok(PrivateKeyType::Ed25519),
             0xb1 => Ok(PrivateKeyType::Secp256k1),
             0xc1 => Ok(PrivateKeyType::Aes256),
+            0xd1 => Ok(PrivateKeyType::P256),
+            0xe1 => Ok(PrivateKeyType::P384),
             _ => Err(Error::InvalidPrivateKey),
         }
     }
@@ -355,6 +438,8 @@ impl From<PrivateKeyType> for u8 {
             PrivateKeyType::Ed25519 => 0xa1,
             PrivateKeyType::Secp256k1 => 0xb1,
             PrivateKeyType::Aes256 => 0xc1,
+            PrivateKeyType::P256 => 0xd1,
+            PrivateKeyType::P384 => 0xe1,
         }
     }
 }
@@ -381,6 +466,8 @@ impl PrivateKey {
                 let mut rng = secp256k1::rand::thread_rng();
                 PrivateKey::Secp256k1(secp256k1::SecretKey::new(&mut rng))
             }
+            PrivateKeyType::P256 => PrivateKey::P256(p256::ecdsa::SigningKey::random(&mut OsRng)),
+            PrivateKeyType::P384 => PrivateKey::P384(p384::ecdsa::SigningKey::random(&mut OsRng)),
         }
     }
 
@@ -402,6 +489,12 @@ impl PrivateKey {
             PrivateKeyType::Secp256k1 => secp256k1::SecretKey::from_slice(&key)
                 .map(PrivateKey::Secp256k1)
                 .map_err(Error::from),
+            PrivateKeyType::P256 => p256::ecdsa::SigningKey::from_slice(&key)
+                .map(PrivateKey::P256)
+                .map_err(Error::from),
+            PrivateKeyType::P384 => p384::ecdsa::SigningKey::from_slice(&key)
+                .map(PrivateKey::P384)
+                .map_err(Error::from),
         }
     }
 
@@ -419,6 +512,8 @@ impl PrivateKey {
         match self {
             PrivateKey::Ed25519(kp) => kp.to_bytes().to_vec(),
             PrivateKey::Secp256k1(sk) => sk.secret_bytes().to_vec(),
+            PrivateKey::P256(sk) => sk.to_bytes().as_slice().to_vec(),
+            PrivateKey::P384(sk) => sk.to_bytes().as_slice().to_vec(),
             PrivateKey::Aes256(key) => key.to_vec(),
         }
     }
@@ -436,6 +531,8 @@ impl PrivateKey {
             PrivateKey::Aes256(_) => PrivateKeyType::Aes256,
             PrivateKey::Ed25519(_) => PrivateKeyType::Ed25519,
             PrivateKey::Secp256k1(_) => PrivateKeyType::Secp256k1,
+            PrivateKey::P256(_) => PrivateKeyType::P256,
+            PrivateKey::P384(_) => PrivateKeyType::P384,
         }
     }
 
@@ -450,6 +547,8 @@ impl PrivateKey {
                 let secp = secp256k1::Secp256k1::new();
                 Ok(secp256k1::PublicKey::from_secret_key(&secp, pk).into())
             }
+            PrivateKey::P256(key) => Ok(PublicKey::P256(*key.verifying_key())),
+            PrivateKey::P384(key) => Ok(PublicKey::P384(*key.verifying_key())),
         }
     }
 
@@ -476,6 +575,14 @@ impl PrivateKey {
                 let msg = secp256k1::Message::from_digest_slice(&hash)?;
                 Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
             }
+            PrivateKey::P256(key) => {
+                let signature: p256::ecdsa::Signature = key.try_sign(data)?;
+                Ok(signature.to_vec())
+            }
+            PrivateKey::P384(key) => {
+                let signature: p384::ecdsa::Signature = key.try_sign(data)?;
+                Ok(signature.to_vec())
+            }
         }
     }
 
@@ -497,7 +604,7 @@ impl PrivateKey {
                 }
                 Ok(mac.finalize().into_bytes().to_vec())
             }
-            PrivateKey::Ed25519(_) => {
+            PrivateKey::Ed25519(_) | PrivateKey::P256(_) | PrivateKey::P384(_) => {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
                 self.sign(&data)
@@ -727,6 +834,16 @@ impl PrivateKey {
                     let enc_key = static_key.diffie_hellman(&public_key);
                     Ok(Zeroizing::new(enc_key.as_bytes().to_vec()))
                 }
+                PrivateKey::P256(sk) => {
+                    let peer: p256::ecdsa::VerifyingKey = public_key.try_into()?;
+                    let shared = p256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
+                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                }
+                PrivateKey::P384(sk) => {
+                    let peer: p384::ecdsa::VerifyingKey = public_key.try_into()?;
+                    let shared = p384::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
+                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                }
             },
             CarrierKeyType::None => match self {
                 PrivateKey::Aes256(key) => Ok(Zeroizing::new(key.to_vec())),
@@ -744,6 +861,16 @@ impl PrivateKey {
                         x25519_dalek::PublicKey::from(&static_key);
                     let enc_key = static_key.diffie_hellman(&public_key);
                     Ok(Zeroizing::new(enc_key.as_bytes().to_vec()))
+                }
+                PrivateKey::P256(sk) => {
+                    let shared =
+                        p256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), sk.verifying_key().as_affine());
+                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
+                }
+                PrivateKey::P384(sk) => {
+                    let shared =
+                        p384::ecdh::diffie_hellman(sk.as_nonzero_scalar(), sk.verifying_key().as_affine());
+                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
                 }
             },
         }

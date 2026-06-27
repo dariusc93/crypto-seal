@@ -75,6 +75,26 @@ mod test {
     }
 
     #[test]
+    fn package_with_p256_key() -> anyhow::Result<()> {
+        let private_key = PrivateKey::new_with(PrivateKeyType::P256);
+        let my_data = String::from("Hello, World!");
+        let sealed_data = my_data.seal_with(&private_key)?;
+        let unsealed_data = sealed_data.open(&private_key)?;
+        assert_eq!(my_data, unsealed_data);
+        Ok(())
+    }
+
+    #[test]
+    fn package_with_p384_key() -> anyhow::Result<()> {
+        let private_key = PrivateKey::new_with(PrivateKeyType::P384);
+        let my_data = String::from("Hello, World!");
+        let sealed_data = my_data.seal_with(&private_key)?;
+        let unsealed_data = sealed_data.open(&private_key)?;
+        assert_eq!(my_data, unsealed_data);
+        Ok(())
+    }
+
+    #[test]
     fn package_with_aes256_key() -> anyhow::Result<()> {
         let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
         let my_data = String::from("Hello, World!");
@@ -263,6 +283,42 @@ mod test {
         assert_eq!(String::from("Hello Everyone!"), unsealed_by_alice);
         assert_eq!(String::from("Hello Everyone!"), unsealed_by_bob);
         assert_eq!(String::from("Hello Everyone!"), unsealed_by_john);
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_shared_package_p256() -> anyhow::Result<()> {
+        let alice_pk = PrivateKey::new_with(PrivateKeyType::P256);
+        let bob_pk = PrivateKey::new_with(PrivateKeyType::P256);
+        let john_pk = PrivateKey::new_with(PrivateKeyType::P256);
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many = message.seal_shared(
+            &alice_pk,
+            vec![
+                alice_pk.public_key()?,
+                bob_pk.public_key()?,
+                john_pk.public_key()?,
+            ],
+        )?;
+
+        assert_eq!(message, sealed_for_many.open(&alice_pk)?);
+        assert_eq!(message, sealed_for_many.open(&bob_pk)?);
+        assert_eq!(message, sealed_for_many.open(&john_pk)?);
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_shared_package_p384() -> anyhow::Result<()> {
+        let alice_pk = PrivateKey::new_with(PrivateKeyType::P384);
+        let bob_pk = PrivateKey::new_with(PrivateKeyType::P384);
+
+        let message = String::from("Hello Everyone!");
+        let sealed_for_many =
+            message.seal_shared(&alice_pk, vec![alice_pk.public_key()?, bob_pk.public_key()?])?;
+
+        assert_eq!(message, sealed_for_many.open(&alice_pk)?);
+        assert_eq!(message, sealed_for_many.open(&bob_pk)?);
         Ok(())
     }
 

@@ -22,6 +22,8 @@ x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 ed25519-dalek = { version = "2.2.0", features = ["serde"] }
 curve25519-dalek = "4.1.3"
 secp256k1 = { version = "0.28.2", features = ["rand-std", "serde"] }
+p256 = { version = "0.13.2", features = ["ecdsa", "ecdh"] }
+p384 = { version = "0.13.1", features = ["ecdsa", "ecdh"] }
 sha2 = "0.10.9"
 hmac = "0.12.1"
 hkdf = "0.12.4"

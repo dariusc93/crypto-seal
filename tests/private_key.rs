@@ -50,6 +50,8 @@ mod test {
         for key_type in [
             PrivateKeyType::Ed25519,
             PrivateKeyType::Secp256k1,
+            PrivateKeyType::P256,
+            PrivateKeyType::P384,
             PrivateKeyType::Aes256,
         ] {
             let key = PrivateKey::new_with(key_type);
@@ -79,6 +81,8 @@ mod test {
         for key_type in [
             PrivateKeyType::Ed25519,
             PrivateKeyType::Secp256k1,
+            PrivateKeyType::P256,
+            PrivateKeyType::P384,
             PrivateKeyType::Aes256,
         ] {
             let key = PrivateKey::new_with(key_type);
@@ -126,6 +130,24 @@ mod test {
     }
 
     #[test]
+    fn p256_sign() -> anyhow::Result<()> {
+        let private_key = PrivateKey::new_with(PrivateKeyType::P256);
+        let plaintext = b"Hello, World!";
+        let signature = private_key.sign(plaintext)?;
+        assert!(private_key.verify(plaintext, &signature).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn p384_sign() -> anyhow::Result<()> {
+        let private_key = PrivateKey::new_with(PrivateKeyType::P384);
+        let plaintext = b"Hello, World!";
+        let signature = private_key.sign(plaintext)?;
+        assert!(private_key.verify(plaintext, &signature).is_ok());
+        Ok(())
+    }
+
+    #[test]
     fn decrypt_short_input_errors() -> anyhow::Result<()> {
         let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
         assert!(private_key.decrypt(&[], Default::default()).is_err());
@@ -138,6 +160,8 @@ mod test {
         for key_type in [
             PrivateKeyType::Ed25519,
             PrivateKeyType::Secp256k1,
+            PrivateKeyType::P256,
+            PrivateKeyType::P384,
             PrivateKeyType::Aes256,
         ] {
             let private_key = PrivateKey::new_with(key_type);
