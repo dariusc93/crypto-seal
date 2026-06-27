@@ -254,10 +254,10 @@ where
         let signed: Signed = Postcard::deserialize(&signed)?;
 
         let sender = signed.public_key.ok_or(Error::InvalidPublicKey)?;
-        if let Some(expect) = expect {
-            if sender != *expect {
-                return Err(Error::InvalidPublicKey);
-            }
+        if let Some(expect) = expect
+            && sender != *expect
+        {
+            return Err(Error::InvalidPublicKey);
         }
         sender.verify(&signing_transcript(&signed.data, &aad), &signed.signature)?;
 
