@@ -510,8 +510,7 @@ impl PrivateKey {
                 PrivateKey::Ed25519(key)
             }
             PrivateKeyType::Aes256 => {
-                let mut key_sized = [0u8; 32];
-                key_sized.copy_from_slice(&generate::<32>());
+                let key_sized = generate::<32>();
                 PrivateKey::Aes256(key_sized)
             }
             PrivateKeyType::Secp256k1 => {
@@ -909,9 +908,9 @@ fn derive_key(ikm: &[u8], salt: &[u8], info: &[u8]) -> Result<Zeroizing<[u8; 32]
 }
 
 /// Used to generate random amount of data and store it in a Vec with a specific capacity
-pub(crate) fn generate<const N: usize>() -> Vec<u8> {
+pub(crate) fn generate<const N: usize>() -> [u8; N] {
     use rand::RngCore;
-    let mut buffer = vec![0u8; N];
+    let mut buffer: [u8; N] = [0u8; N];
     OsRng.fill_bytes(&mut buffer);
     buffer
 }
