@@ -22,9 +22,13 @@ use zeroize::{Zeroize, Zeroizing};
 type HmacSha256 = Hmac<Sha256>;
 
 /// Container of private keys
+///
 /// The following is supported
+///
 /// - [`ed25519_dalek`]
-/// - [`secp256k1`]
+/// - [`k256`]
+/// - [`p256`]
+/// - [`p384`]
 /// - [`aes_gcm::Aes256Gcm`]
 #[derive(Clone)]
 pub enum PrivateKey {
@@ -59,9 +63,21 @@ impl Zeroize for PrivateKey {
     fn zeroize(&mut self) {
         match self {
             PrivateKey::Ed25519(key) => *key = SigningKey::from_bytes(&[0u8; 32]),
-            PrivateKey::Secp256k1(key) => *key = k256::ecdsa::SigningKey::random(&mut OsRng),
-            PrivateKey::P256(key) => *key = p256::ecdsa::SigningKey::random(&mut OsRng),
-            PrivateKey::P384(key) => *key = p384::ecdsa::SigningKey::random(&mut OsRng),
+            PrivateKey::Secp256k1(key) => {
+                if let Ok(dummy) = k256::ecdsa::SigningKey::from_slice(&[1u8; 32]) {
+                    *key = dummy
+                }
+            }
+            PrivateKey::P256(key) => {
+                if let Ok(dummy) = p256::ecdsa::SigningKey::from_slice(&[1u8; 32]) {
+                    *key = dummy
+                }
+            }
+            PrivateKey::P384(key) => {
+                if let Ok(dummy) = p384::ecdsa::SigningKey::from_slice(&[1u8; 48]) {
+                    *key = dummy
+                }
+            }
             PrivateKey::Aes256(key) => key.zeroize(),
         }
     }
@@ -74,9 +90,13 @@ impl Drop for PrivateKey {
 }
 
 /// Container of public keys
+///
 /// The following is supported
+///
 /// - [`ed25519_dalek`]
-/// - [`secp256k1`]
+/// - [`k256`]
+/// - [`p256`]
+/// - [`p384`]
 #[derive(Clone, Copy)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::VerifyingKey),
@@ -469,7 +489,7 @@ impl PrivateKey {
         }
     }
 
-    /// Imports a private key with a identifier to identify if its [`PrivateKey::Ed25519`], [`PrivateKey::Secp256k1`], or [`PrivateKey::Aes256`]
+    /// Imports a private key from bytes prefixed with a [`PrivateKeyType`] identifier
     pub fn decode<B: AsRef<[u8]>>(bytes: B) -> Result<PrivateKey> {
         let (ktype, key) = bytes
             .as_ref()
