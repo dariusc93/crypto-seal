@@ -1,14 +1,14 @@
 pub mod error;
-pub mod key;
 pub mod format;
+pub mod key;
 
 use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::Error;
-use crate::format::Format;
 use crate::format::postcard::Postcard;
+use crate::format::Format;
 use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
 pub type Result<T> = std::result::Result<T, Error>;

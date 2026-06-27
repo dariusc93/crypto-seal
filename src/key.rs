@@ -557,7 +557,10 @@ impl PrivateKey {
 
     /// Imports a private key with a identifier to identify if its [`PrivateKey::Ed25519`], [`PrivateKey::Secp256k1`], or [`PrivateKey::Aes256`]
     pub fn decode<B: AsRef<[u8]>>(bytes: B) -> Result<PrivateKey> {
-        let (ktype, key) = bytes.as_ref().split_first().ok_or(Error::InvalidPrivateKey)?;
+        let (ktype, key) = bytes
+            .as_ref()
+            .split_first()
+            .ok_or(Error::InvalidPrivateKey)?;
         Self::import((*ktype).try_into()?, key.to_vec())
     }
 
@@ -606,8 +609,8 @@ impl PrivateKey {
         match self {
             PrivateKey::Aes256(key) => {
                 let mac_key = derive_key(key, &[], MAC_INFO)?;
-                let mut mac =
-                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::EncryptionError)?;
+                let mut mac = <HmacSha256 as Mac>::new_from_slice(&*mac_key)
+                    .map_err(|_| Error::EncryptionError)?;
                 mac.update(data);
                 Ok(mac.finalize().into_bytes().to_vec())
             }
@@ -631,8 +634,8 @@ impl PrivateKey {
         match self {
             PrivateKey::Aes256(key) => {
                 let mac_key = derive_key(key, &[], MAC_INFO)?;
-                let mut mac =
-                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::EncryptionError)?;
+                let mut mac = <HmacSha256 as Mac>::new_from_slice(&*mac_key)
+                    .map_err(|_| Error::EncryptionError)?;
                 let mut buffer = [0u8; WRITE_BUFFER_SIZE];
                 loop {
                     match reader.read(&mut buffer) {
@@ -667,10 +670,11 @@ impl PrivateKey {
         match self {
             PrivateKey::Aes256(key) => {
                 let mac_key = derive_key(key, &[], MAC_INFO)?;
-                let mut mac =
-                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::InvalidSignature)?;
+                let mut mac = <HmacSha256 as Mac>::new_from_slice(&*mac_key)
+                    .map_err(|_| Error::InvalidSignature)?;
                 mac.update(data);
-                mac.verify_slice(signature).map_err(|_| Error::InvalidSignature)
+                mac.verify_slice(signature)
+                    .map_err(|_| Error::InvalidSignature)
             }
             _ => {
                 let public_key = self.public_key()?;
@@ -684,8 +688,8 @@ impl PrivateKey {
         match self {
             PrivateKey::Aes256(key) => {
                 let mac_key = derive_key(key, &[], MAC_INFO)?;
-                let mut mac =
-                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::InvalidSignature)?;
+                let mut mac = <HmacSha256 as Mac>::new_from_slice(&*mac_key)
+                    .map_err(|_| Error::InvalidSignature)?;
                 let mut buffer = [0u8; WRITE_BUFFER_SIZE];
                 loop {
                     match reader.read(&mut buffer) {
@@ -695,7 +699,8 @@ impl PrivateKey {
                         Err(e) => return Err(Error::from(e)),
                     }
                 }
-                mac.verify_slice(signature).map_err(|_| Error::InvalidSignature)
+                mac.verify_slice(signature)
+                    .map_err(|_| Error::InvalidSignature)
             }
             _ => {
                 let public_key = self.public_key()?;
@@ -769,7 +774,13 @@ impl PrivateKey {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*key));
         let nonce = Nonce::from_slice(raw_nonce);
         cipher
-            .decrypt(nonce, Payload { msg: ciphertext, aad })
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad,
+                },
+            )
             .map_err(|_| Error::DecryptionError)
     }
 }

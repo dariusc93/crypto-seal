@@ -1,7 +1,7 @@
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use crate::error::Error;
 use crate::format::Format;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 pub struct Postcard;
 

@@ -75,9 +75,17 @@ mod test {
             let key = PrivateKey::new_with(key_type);
             let plaintext = vec![7u8; 5000];
             let mut ciphertext = Vec::new();
-            key.encrypt_stream(&mut Cursor::new(&plaintext), &mut ciphertext, Default::default())?;
+            key.encrypt_stream(
+                &mut Cursor::new(&plaintext),
+                &mut ciphertext,
+                Default::default(),
+            )?;
             let mut decrypted = Vec::new();
-            key.decrypt_stream(&mut Cursor::new(&ciphertext), &mut decrypted, Default::default())?;
+            key.decrypt_stream(
+                &mut Cursor::new(&ciphertext),
+                &mut decrypted,
+                Default::default(),
+            )?;
             assert_eq!(plaintext, decrypted);
         }
         Ok(())
@@ -135,7 +143,9 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
         let data = b"Hello, World!";
         let signature = private_key.sign_reader(&mut &data[..])?;
-        assert!(private_key.verify_reader(&mut &data[..], &signature).is_ok());
+        assert!(private_key
+            .verify_reader(&mut &data[..], &signature)
+            .is_ok());
         Ok(())
     }
 
@@ -144,7 +154,9 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Secp256k1);
         let data = b"Hello, World!";
         let signature = private_key.sign_reader(&mut &data[..])?;
-        assert!(private_key.verify_reader(&mut &data[..], &signature).is_ok());
+        assert!(private_key
+            .verify_reader(&mut &data[..], &signature)
+            .is_ok());
         Ok(())
     }
 }
