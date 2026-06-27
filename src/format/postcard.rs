@@ -3,6 +3,7 @@ use crate::format::Format;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Postcard;
 
 impl Format for Postcard {

@@ -17,8 +17,6 @@ pub enum Error {
     DecryptionStreamError,
     #[error("Invalid Signature")]
     InvalidSignature,
-    #[error("Invalid Package")]
-    InvalidPackage,
     #[error("Invalid public key")]
     InvalidPublicKey,
     #[error("Invalid private key")]
@@ -38,8 +36,6 @@ pub enum Error {
     SerdeJsonError(#[from] serde_json::Error),
     #[error(transparent)]
     PostcardError(#[from] postcard::Error),
-    #[error(transparent)]
-    Base58EncodeError(#[from] bs58::encode::Error),
     #[error(transparent)]
     Base58DecodeError(#[from] bs58::decode::Error),
     #[cfg(feature = "libp2p-identity")]

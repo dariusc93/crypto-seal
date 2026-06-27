@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 pub mod error;
 pub mod format;
 pub mod key;
@@ -13,19 +15,27 @@ use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn recipients_aad(ephemeral: &PublicKey, recipients: &[PublicKey]) -> Vec<u8> {
-    let mut keys = recipients.iter().map(PublicKey::encode).collect::<Vec<_>>();
-    keys.sort();
+fn recipients_aad(ephemeral: &PublicKey, recipients: &HashMap<PublicKey, Vec<u8>>) -> Vec<u8> {
+    let mut entries = recipients
+        .iter()
+        .map(|(public_key, wrapped)| (public_key.encode(), wrapped))
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
     let mut aad = ephemeral.encode();
-    for key in keys {
+    for (key, wrapped) in entries {
+        aad.extend_from_slice(&(key.len() as u64).to_le_bytes());
         aad.extend_from_slice(&key);
+        aad.extend_from_slice(&(wrapped.len() as u64).to_le_bytes());
+        aad.extend_from_slice(wrapped);
     }
     aad
 }
 
 fn signing_transcript(data: &[u8], aad: &[u8]) -> Vec<u8> {
-    let mut transcript = Vec::with_capacity(data.len() + aad.len());
+    let mut transcript = Vec::with_capacity(16 + data.len() + aad.len());
+    transcript.extend_from_slice(&(data.len() as u64).to_le_bytes());
     transcript.extend_from_slice(data);
+    transcript.extend_from_slice(&(aad.len() as u64).to_le_bytes());
     transcript.extend_from_slice(aad);
     transcript
 }
@@ -134,7 +144,7 @@ where
         let inner = Postcard::serialize(self)?;
         let signed = Signed {
             signature: private_key.sign(&inner)?,
-            public_key: private_key.public_key().ok(),
+            public_key: None,
             data: inner,
         };
         let signed = Postcard::serialize(&signed)?;
@@ -177,10 +187,7 @@ where
             public_keys.insert(*recipient, wrapped);
         }
 
-        let aad = recipients_aad(
-            &ephemeral_pub,
-            &public_keys.keys().copied().collect::<Vec<_>>(),
-        );
+        let aad = recipients_aad(&ephemeral_pub, &public_keys);
 
         let signed = Signed {
             signature: private_key.sign(signing_transcript(&inner, &aad))?,
@@ -220,16 +227,12 @@ where
 
     fn open_shared_inner(&self, key: &PrivateKey, expect: Option<&PublicKey>) -> Result<T> {
         let own_pk = key.public_key()?;
-        if !self.has_recipient(&own_pk) {
-            return Err(Error::InvalidPublicKey);
-        }
-
         let ephemeral = self.public_key.as_ref().ok_or(Error::InvalidPublicKey)?;
 
         let enc_k = self
             .recipients
             .get(&own_pk)
-            .ok_or(Error::RecipientsNotAvailable)?;
+            .ok_or(Error::InvalidPublicKey)?;
 
         let data_key = key.decrypt(
             enc_k,
@@ -238,7 +241,7 @@ where
             },
         )?;
 
-        let aad = recipients_aad(ephemeral, &self.recipients());
+        let aad = recipients_aad(ephemeral, &self.recipients);
         let signed = key.decrypt_with_aad(
             &self.data,
             key::CarrierKeyType::Direct {

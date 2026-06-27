@@ -49,3 +49,4 @@ libp2p-identity = ["dep:libp2p-identity"]
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

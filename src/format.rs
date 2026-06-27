@@ -1,6 +1,7 @@
 pub mod postcard;
 
 #[cfg(feature = "json")]
+#[cfg_attr(docsrs, doc(cfg(feature = "json")))]
 pub mod json;
 
 use serde::de::DeserializeOwned;
