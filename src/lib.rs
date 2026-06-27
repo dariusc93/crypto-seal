@@ -80,6 +80,13 @@ fn recipients_aad(ephemeral: &PublicKey, recipients: &[PublicKey]) -> Vec<u8> {
     aad
 }
 
+fn signing_transcript(data: &[u8], aad: &[u8]) -> Vec<u8> {
+    let mut transcript = Vec::with_capacity(data.len() + aad.len());
+    transcript.extend_from_slice(data);
+    transcript.extend_from_slice(aad);
+    transcript
+}
+
 pub trait Seal {
     /// Encrypt with a freshly generated [`PrivateKey`], returning it alongside the [`Package`]
     fn seal(&self) -> Result<(PrivateKey, Package<Self>)>;
@@ -103,29 +110,29 @@ struct Signed {
 }
 
 #[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
-pub struct Package<T: ?Sized> {
+pub struct Package<T: ?Sized, F = Postcard> {
     data: Vec<u8>,
     public_key: Option<PublicKey>,
     recipients: RecipientCarrier,
     #[serde(skip)]
-    marker: PhantomData<T>,
+    marker0: PhantomData<T>,
+    #[serde(skip)]
+    marker1: PhantomData<F>,
 }
 
-impl<T: ?Sized> Default for Package<T> {
+impl<T: ?Sized, F> Default for Package<T, F> {
     fn default() -> Self {
         Self {
             data: Vec::new(),
             public_key: None,
             recipients: RecipientCarrier::None,
-            marker: PhantomData,
+            marker0: PhantomData,
+            marker1: PhantomData,
         }
     }
 }
 
-impl<T> Package<T>
-where
-    T: Serialize + DeserializeOwned + Clone,
-{
+impl<T, F> Package<T, F> {
     pub fn import(
         data: Vec<u8>,
         public_key: Option<PublicKey>,
@@ -135,28 +142,11 @@ where
             data,
             public_key,
             recipients,
-            marker: PhantomData,
+            marker0: PhantomData,
+            marker1: PhantomData,
         }
     }
 
-    pub fn from_bytes<A: AsRef<[u8]>>(data: A) -> Result<Self> {
-        Postcard::deserialize(data.as_ref())
-    }
-
-    pub fn from_bytes_as<F: Format, A: AsRef<[u8]>>(data: A) -> Result<Self> {
-        F::deserialize(data.as_ref())
-    }
-
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        Postcard::serialize(self)
-    }
-
-    pub fn to_bytes_as<F: Format>(&self) -> Result<Vec<u8>> {
-        F::serialize(self)
-    }
-}
-
-impl<T> Package<T> {
     pub fn has_recipient(&self, public_key: &PublicKey) -> bool {
         let list = self.recipients();
         list.contains(public_key)
@@ -164,6 +154,26 @@ impl<T> Package<T> {
 
     pub fn recipients(&self) -> Vec<PublicKey> {
         self.recipients.recipients()
+    }
+}
+
+impl<T, F> Package<T, F>
+where
+    T: Serialize,
+    F: Format,
+{
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        F::serialize(self)
+    }
+}
+
+impl<T, F> Package<T, F>
+where
+    T: DeserializeOwned,
+    F: Format,
+{
+    pub fn from_bytes<A: AsRef<[u8]>>(data: A) -> Result<Self> {
+        F::deserialize(data.as_ref())
     }
 }
 
@@ -200,13 +210,6 @@ where
         let ptype = sender.key_type();
 
         let inner = Postcard::serialize(self)?;
-        let signed = Signed {
-            signature: private_key.sign(&inner)?,
-            public_key: Some(sender),
-            data: inner,
-        };
-        let signed = Postcard::serialize(&signed)?;
-
         let data_key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
 
         let ephemeral = PrivateKey::new_with(match ptype {
@@ -234,6 +237,13 @@ where
             &public_keys.keys().copied().collect::<Vec<_>>(),
         );
 
+        let signed = Signed {
+            signature: private_key.sign(signing_transcript(&inner, &aad))?,
+            public_key: Some(sender),
+            data: inner,
+        };
+        let signed = Postcard::serialize(&signed)?;
+
         package.data = private_key.encrypt_with_aad(
             &signed,
             key::CarrierKeyType::Direct { key: data_key },
@@ -245,7 +255,7 @@ where
     }
 }
 
-impl<T> Package<T>
+impl<T, F> Package<T, F>
 where
     T: DeserializeOwned,
 {
@@ -301,7 +311,7 @@ where
                 return Err(Error::InvalidPublicKey);
             }
         }
-        sender.verify(&signed.data, &signed.signature)?;
+        sender.verify(&signing_transcript(&signed.data, &aad), &signed.signature)?;
 
         Postcard::deserialize(&signed.data)
     }
