@@ -1,12 +1,12 @@
-use crypto_seal::{error::Error, ToOpen, ToSeal};
+use crypto_seal::{error::Error, Seal};
 
 fn main() -> Result<(), Error> {
-    let my_data = b"Hello, World!";
+    let my_data = String::from("Hello, World!");
 
     let (my_key, sealed_data) = my_data.seal()?;
 
     let unsealed_data = sealed_data.open(&my_key)?;
 
-    assert_eq!(b"Hello, World!", &unsealed_data);
+    assert_eq!(my_data, unsealed_data);
     Ok(())
 }

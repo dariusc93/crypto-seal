@@ -20,9 +20,9 @@ pub enum Error {
     #[error("Invalid Package")]
     InvalidPackage,
     #[error("Invalid public key")]
-    InvalidPublickey,
+    InvalidPublicKey,
     #[error("Invalid private key")]
-    InvalidPrivatekey,
+    InvalidPrivateKey,
     #[error("Recipients was not set or available")]
     RecipientsNotAvailable,
     #[error("Unable to convert slice: {0}")]
@@ -33,8 +33,11 @@ pub enum Error {
     Secp256k1Error(#[from] secp256k1::Error),
     #[error(transparent)]
     IoError(#[from] io::Error),
+    #[cfg(feature = "json")]
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),
+    #[error(transparent)]
+    PostcardError(#[from] postcard::Error),
     #[error(transparent)]
     Base58EncodeError(#[from] bs58::encode::Error),
     #[error(transparent)]

@@ -188,7 +188,7 @@ impl TryFrom<libp2p_identity::PublicKey> for PublicKey {
                 let k = public_key.try_into_ed25519()?;
                 k.to_bytes()
             }
-            _ => return Err(Error::InvalidPublickey),
+            _ => return Err(Error::InvalidPublicKey),
         };
 
         PublicKey::from_bytes(PublicKeyType::Ed25519, &key)
@@ -206,7 +206,7 @@ impl TryFrom<PublicKey> for libp2p_identity::PublicKey {
                 let pk: libp2p_identity::PublicKey = public_key.into();
                 Ok(pk)
             }
-            PublicKey::Secp256k1(_) => Err(Error::InvalidPublickey),
+            PublicKey::Secp256k1(_) => Err(Error::InvalidPublicKey),
         }
     }
 }
@@ -261,7 +261,7 @@ impl TryFrom<u8> for PublicKeyType {
         match value {
             0xa1 => Ok(PublicKeyType::Ed25519),
             0xb1 => Ok(PublicKeyType::Secp256k1),
-            _ => Err(Error::InvalidPublickey),
+            _ => Err(Error::InvalidPublicKey),
         }
     }
 }
@@ -293,7 +293,7 @@ impl TryFrom<PublicKey> for secp256k1::PublicKey {
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
         match value {
             PublicKey::Secp256k1(pk) => Ok(pk),
-            PublicKey::Ed25519(_) => Err(Error::InvalidPublickey),
+            PublicKey::Ed25519(_) => Err(Error::InvalidPublicKey),
         }
     }
 }
@@ -331,7 +331,7 @@ impl TryFrom<PublicKey> for ed25519_dalek::VerifyingKey {
 
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
         match value {
-            PublicKey::Secp256k1(_) => Err(Error::InvalidPublickey),
+            PublicKey::Secp256k1(_) => Err(Error::InvalidPublicKey),
             PublicKey::Ed25519(pk) => Ok(pk),
         }
     }
@@ -342,7 +342,7 @@ impl TryFrom<PublicKey> for x25519_dalek::PublicKey {
 
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
         match value {
-            PublicKey::Secp256k1(_) => Err(Error::InvalidPublickey),
+            PublicKey::Secp256k1(_) => Err(Error::InvalidPublicKey),
             PublicKey::Ed25519(pk) => {
                 let ep = CompressedEdwardsY(pk.to_bytes())
                     .decompress()
@@ -376,13 +376,8 @@ impl PublicKey {
     }
 
     pub fn decode(bytes: &[u8]) -> Result<PublicKey> {
-        if bytes.is_empty() {
-            return Err(Error::InvalidPublickey);
-        }
-
-        let mut encoded_key = bytes.to_vec();
-        let ktype = encoded_key.remove(0).try_into()?;
-        Self::from_bytes(ktype, &encoded_key)
+        let (ktype, key) = bytes.split_first().ok_or(Error::InvalidPublicKey)?;
+        Self::from_bytes((*ktype).try_into()?, key)
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -462,9 +457,10 @@ impl PublicKey {
     }
 }
 /// [`PrivateKey`] Types
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub enum PrivateKeyType {
     /// ED25519 Private Key
+    #[default]
     Ed25519,
 
     /// AES-256 Private Key
@@ -472,12 +468,6 @@ pub enum PrivateKeyType {
 
     /// Secp256k1 Private Key
     Secp256k1,
-}
-
-impl Default for PrivateKeyType {
-    fn default() -> Self {
-        Self::Ed25519
-    }
 }
 
 const WRITE_BUFFER_SIZE: usize = 512;
@@ -495,7 +485,7 @@ impl TryFrom<u8> for PrivateKeyType {
             0xa1 => Ok(PrivateKeyType::Ed25519),
             0xb1 => Ok(PrivateKeyType::Secp256k1),
             0xc1 => Ok(PrivateKeyType::Aes256),
-            _ => Err(Error::InvalidPublickey),
+            _ => Err(Error::InvalidPrivateKey),
         }
     }
 }
@@ -567,13 +557,8 @@ impl PrivateKey {
 
     /// Imports a private key with a identifier to identify if its [`PrivateKey::Ed25519`], [`PrivateKey::Secp256k1`], or [`PrivateKey::Aes256`]
     pub fn decode<B: AsRef<[u8]>>(bytes: B) -> Result<PrivateKey> {
-        let bytes = bytes.as_ref();
-        if bytes.is_empty() {
-            return Err(Error::InvalidPrivatekey);
-        }
-        let mut encoded_key = bytes.to_vec();
-        let ktype = encoded_key.remove(0).try_into()?;
-        Self::import(ktype, encoded_key)
+        let (ktype, key) = bytes.as_ref().split_first().ok_or(Error::InvalidPrivateKey)?;
+        Self::import((*ktype).try_into()?, key.to_vec())
     }
 
     /// Exports the keys out as bytes.
@@ -616,8 +601,6 @@ impl PrivateKey {
     }
 
     /// Sign the data provided using [`PrivateKey`]
-    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
-    //TODO: Use HMAC for AES
     pub fn sign<B: AsRef<[u8]>>(&self, data: B) -> Result<Vec<u8>> {
         let data = data.as_ref();
         match self {
@@ -644,8 +627,6 @@ impl PrivateKey {
     }
 
     /// Sign the data from [`std::io::Read`] using [`PrivateKey`]
-    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
-    //TODO: Use HMAC for AES
     pub fn sign_reader(&self, reader: &mut impl io::Read) -> Result<Vec<u8>> {
         match self {
             PrivateKey::Aes256(key) => {
@@ -682,8 +663,6 @@ impl PrivateKey {
     }
 
     /// Verify the signature of the data provided using [`PrivateKey`]
-    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
-    //TODO: Use HMAC for AES
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         match self {
             PrivateKey::Aes256(key) => {
@@ -701,8 +680,6 @@ impl PrivateKey {
     }
 
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
-    /// Note: HMAC will be used soon when [`PrivateKeyType::Aes256`] is used
-    //TODO: Use HMAC for AES
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
             PrivateKey::Aes256(key) => {
@@ -730,7 +707,7 @@ impl PrivateKey {
 
 #[derive(Default, Copy, Clone, PartialEq)]
 pub enum CarrierKeyType {
-    /// Use AES128 key
+    /// Use AES256 key
     Direct { key: [u8; 32] },
 
     /// Use key exchange to generate a shared key
@@ -738,7 +715,7 @@ pub enum CarrierKeyType {
 
     /// Use own private key
     /// > **Note** If public key encryption is used, this will use your own private/public key for key exchange
-    /// otherwise if its AES128, it will encrypt with that key itself
+    /// > otherwise if its AES256, it will encrypt with that key itself
     #[default]
     None,
 }
@@ -817,22 +794,18 @@ impl PrivateKey {
         writer.write_all(&salt)?;
         writer.write_all(&nonce)?;
         loop {
-            match reader.read(&mut buffer) {
-                Ok(WRITE_BUFFER_SIZE) => {
-                    let ciphertext = stream
-                        .encrypt_next(buffer.as_slice())
-                        .map_err(|_| Error::EncryptionStreamError)?;
-                    writer.write_all(&ciphertext)?;
-                }
-                Ok(read_count) => {
-                    let ciphertext = stream
-                        .encrypt_last(&buffer[..read_count])
-                        .map_err(|_| Error::EncryptionStreamError)?;
-                    writer.write_all(&ciphertext)?;
-                    break;
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(Error::from(e)),
+            let read_count = fill(reader, &mut buffer)?;
+            if read_count == WRITE_BUFFER_SIZE {
+                let ciphertext = stream
+                    .encrypt_next(buffer.as_slice())
+                    .map_err(|_| Error::EncryptionStreamError)?;
+                writer.write_all(&ciphertext)?;
+            } else {
+                let ciphertext = stream
+                    .encrypt_last(&buffer[..read_count])
+                    .map_err(|_| Error::EncryptionStreamError)?;
+                writer.write_all(&ciphertext)?;
+                break;
             }
         }
         Ok(())
@@ -858,25 +831,19 @@ impl PrivateKey {
         let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
         let mut buffer = [0u8; READ_BUFFER_SIZE];
         loop {
-            match reader.read(&mut buffer) {
-                Ok(READ_BUFFER_SIZE) => {
-                    let plaintext = stream
-                        .decrypt_next(buffer.as_slice())
-                        .map_err(|_| Error::DecryptionStreamError)?;
-
-                    writer.write_all(&plaintext)?
-                }
-                Ok(0) => break,
-                Ok(read_count) => {
-                    let plaintext = stream
-                        .decrypt_last(&buffer[..read_count])
-                        .map_err(|_| Error::DecryptionStreamError)?;
-                    writer.write_all(&plaintext)?;
-                    break;
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(Error::from(e)),
-            };
+            let read_count = fill(reader, &mut buffer)?;
+            if read_count == READ_BUFFER_SIZE {
+                let plaintext = stream
+                    .decrypt_next(buffer.as_slice())
+                    .map_err(|_| Error::DecryptionStreamError)?;
+                writer.write_all(&plaintext)?;
+            } else {
+                let plaintext = stream
+                    .decrypt_last(&buffer[..read_count])
+                    .map_err(|_| Error::DecryptionStreamError)?;
+                writer.write_all(&plaintext)?;
+                break;
+            }
         }
         writer.flush()?;
         Ok(())
@@ -922,6 +889,19 @@ impl PrivateKey {
             },
         }
     }
+}
+
+fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match reader.read(&mut buffer[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
 }
 
 fn derive_key(ikm: &[u8], salt: &[u8], info: &[u8]) -> Result<Zeroizing<[u8; 32]>> {

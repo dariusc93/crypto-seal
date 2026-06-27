@@ -46,6 +46,15 @@ mod test {
     }
 
     #[test]
+    fn encrypt_tamper_fails() -> anyhow::Result<()> {
+        let key = PrivateKey::new_with(PrivateKeyType::Aes256);
+        let mut ciphertext = key.encrypt(b"secret", Default::default())?;
+        ciphertext[0] ^= 0xff;
+        assert!(key.decrypt(&ciphertext, Default::default()).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn aes256_sign() -> anyhow::Result<()> {
         let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
         let plaintext = b"Hello, World!";
