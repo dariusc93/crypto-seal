@@ -1,45 +1,17 @@
 pub mod error;
 pub mod key;
+pub mod format;
 
 use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::Error;
+use crate::format::Format;
+use crate::format::postcard::Postcard;
 use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-pub trait Format {
-    fn serialize<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>>;
-    fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> Result<T>;
-}
-
-pub struct Postcard;
-
-impl Format for Postcard {
-    fn serialize<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
-        postcard::to_allocvec(value).map_err(Error::from)
-    }
-
-    fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
-        postcard::from_bytes(bytes).map_err(Error::from)
-    }
-}
-
-#[cfg(feature = "json")]
-pub struct Json;
-
-#[cfg(feature = "json")]
-impl Format for Json {
-    fn serialize<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
-        serde_json::to_vec(value).map_err(Error::from)
-    }
-
-    fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
-        serde_json::from_slice(bytes).map_err(Error::from)
-    }
-}
 
 #[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]

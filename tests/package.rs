@@ -174,7 +174,7 @@ mod test {
     #[cfg(feature = "json")]
     #[test]
     fn shared_recipient_tampering_fails_open() -> anyhow::Result<()> {
-        use crypto_seal::{Format, Json};
+        use crypto_seal::{format::{Format, json::Json}};
         let alice = PrivateKey::new();
         let bob = PrivateKey::new();
         let john = PrivateKey::new();
@@ -194,7 +194,7 @@ mod test {
     #[cfg(feature = "json")]
     #[test]
     fn tampered_ciphertext_fails_open() -> anyhow::Result<()> {
-        use crypto_seal::{Format, Json};
+        use crypto_seal::{format::{Format, json::Json}};
         let key = PrivateKey::new();
         let sealed = String::from("secret").seal_with(&key)?;
         let mut value: serde_json::Value = serde_json::from_slice(&Json::serialize(&sealed)?)?;
