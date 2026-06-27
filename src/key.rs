@@ -431,16 +431,10 @@ impl PublicKey {
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
-            PublicKey::Ed25519(key) => {
-                if signature.len() != 64 {
-                    return Err(Error::InvalidSignature);
-                }
-                let mut hasher: Sha512 = Sha512::new();
-                io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize().to_vec();
-                let signature = Signature::from_bytes(signature.try_into()?);
-                key.verify(&hash, &signature)?;
-                Ok(())
+            PublicKey::Ed25519(_) => {
+                let mut data = Vec::new();
+                reader.read_to_end(&mut data)?;
+                self.verify(&data, signature)
             }
             PublicKey::Secp256k1(key) => {
                 let secp = secp256k1::Secp256k1::new();
@@ -647,12 +641,10 @@ impl PrivateKey {
                 }
                 Ok(mac.finalize().into_bytes().to_vec())
             }
-            PrivateKey::Ed25519(key) => {
-                let mut hasher: Sha512 = Sha512::new();
-                io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize().to_vec();
-                let signature = key.try_sign(&hash)?;
-                Ok(signature.to_bytes().to_vec())
+            PrivateKey::Ed25519(_) => {
+                let mut data = Vec::new();
+                reader.read_to_end(&mut data)?;
+                self.sign(&data)
             }
             PrivateKey::Secp256k1(key) => {
                 let secp = secp256k1::Secp256k1::new();
