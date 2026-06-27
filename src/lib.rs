@@ -13,31 +13,6 @@ use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum RecipientCarrier {
-    Bundle {
-        public_keys: HashMap<PublicKey, Vec<u8>>,
-    },
-    #[default]
-    None,
-}
-
-impl RecipientCarrier {
-    fn recipients(&self) -> Vec<PublicKey> {
-        match self {
-            RecipientCarrier::Bundle { public_keys } => {
-                public_keys.keys().copied().collect::<Vec<_>>()
-            }
-            RecipientCarrier::None => vec![],
-        }
-    }
-
-    fn is_none(&self) -> bool {
-        matches!(self, RecipientCarrier::None)
-    }
-}
-
 fn recipients_aad(ephemeral: &PublicKey, recipients: &[PublicKey]) -> Vec<u8> {
     let mut keys = recipients.iter().map(PublicKey::encode).collect::<Vec<_>>();
     keys.sort();
@@ -81,7 +56,7 @@ struct Signed {
 pub struct Package<T, F = Postcard> {
     data: Vec<u8>,
     public_key: Option<PublicKey>,
-    recipients: RecipientCarrier,
+    recipients: HashMap<PublicKey, Vec<u8>>,
     #[serde(skip)]
     marker0: PhantomData<T>,
     #[serde(skip)]
@@ -93,7 +68,7 @@ impl<T, F> Default for Package<T, F> {
         Self {
             data: Vec::new(),
             public_key: None,
-            recipients: RecipientCarrier::None,
+            recipients: HashMap::new(),
             marker0: PhantomData,
             marker1: PhantomData,
         }
@@ -104,7 +79,7 @@ impl<T, F> Package<T, F> {
     pub fn import(
         data: Vec<u8>,
         public_key: Option<PublicKey>,
-        recipients: RecipientCarrier,
+        recipients: HashMap<PublicKey, Vec<u8>>,
     ) -> Self {
         Self {
             data,
@@ -116,12 +91,11 @@ impl<T, F> Package<T, F> {
     }
 
     pub fn has_recipient(&self, public_key: &PublicKey) -> bool {
-        let list = self.recipients();
-        list.contains(public_key)
+        self.recipients.contains_key(public_key)
     }
 
     pub fn recipients(&self) -> Vec<PublicKey> {
-        self.recipients.recipients()
+        self.recipients.keys().copied().collect::<Vec<_>>()
     }
 }
 
@@ -173,6 +147,9 @@ where
         private_key: &PrivateKey,
         recipients: Vec<PublicKey>,
     ) -> Result<Package<T>> {
+        if recipients.is_empty() {
+            return Err(Error::RecipientsNotAvailable);
+        }
         let mut package = Package::default();
         let sender = private_key.public_key()?;
         let ptype = sender.key_type();
@@ -217,7 +194,7 @@ where
             key::CarrierKeyType::Direct { key: data_key },
             &aad,
         )?;
-        package.recipients = RecipientCarrier::Bundle { public_keys };
+        package.recipients = public_keys;
         package.public_key = Some(ephemeral_pub);
         Ok(package)
     }
@@ -228,7 +205,7 @@ where
     T: DeserializeOwned,
 {
     pub fn open(&self, key: &PrivateKey) -> Result<T> {
-        if self.recipients.is_none() {
+        if self.recipients.is_empty() {
             let signed = key.decrypt(&self.data, Default::default())?;
             let signed: Signed = Postcard::deserialize(&signed)?;
             key.verify(&signed.data, &signed.signature)?;
@@ -249,12 +226,10 @@ where
 
         let ephemeral = self.public_key.as_ref().ok_or(Error::InvalidPublicKey)?;
 
-        let enc_k = match &self.recipients {
-            RecipientCarrier::Bundle { public_keys } => public_keys
-                .get(&own_pk)
-                .ok_or(Error::RecipientsNotAvailable)?,
-            _ => return Err(Error::RecipientsNotAvailable),
-        };
+        let enc_k = self
+            .recipients
+            .get(&own_pk)
+            .ok_or(Error::RecipientsNotAvailable)?;
 
         let data_key = key.decrypt(
             enc_k,

@@ -181,9 +181,9 @@ mod test {
         let sealed = String::from("Hello!")
             .seal_shared(&alice, vec![bob.public_key()?, john.public_key()?])?;
         let mut value: serde_json::Value = serde_json::from_slice(&Json::serialize(&sealed)?)?;
-        let bundle = value["recipients"]["bundle"]["public_keys"]
+        let bundle = value["recipients"]
             .as_object_mut()
-            .expect("bundle");
+            .expect("recipients");
         bundle.remove(&john.public_key()?.to_string());
         let bytes = serde_json::to_vec(&value)?;
         let tampered: Package<String> = Json::deserialize(&bytes)?;
