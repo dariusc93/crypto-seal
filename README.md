@@ -46,7 +46,7 @@ fn main() -> Result<(), Error> {
 
 ## MSRV
 
-The minimum supported rust version is 1.74, which can be changed in the future. There is no guarantee that this library will work on older versions of rust.
+The minimum supported rust version is 1.93, which can be changed in the future. There is no guarantee that this library will work on older versions of rust.
 
 
 ## License
