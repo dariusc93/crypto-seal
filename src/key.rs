@@ -29,7 +29,7 @@ type HmacSha256 = Hmac<Sha256>;
 #[derive(Clone)]
 pub enum PrivateKey {
     Ed25519(ed25519_dalek::SigningKey),
-    Secp256k1(secp256k1::SecretKey),
+    Secp256k1(k256::ecdsa::SigningKey),
     P256(p256::ecdsa::SigningKey),
     P384(p384::ecdsa::SigningKey),
     Aes256([u8; 32]),
@@ -59,7 +59,7 @@ impl Zeroize for PrivateKey {
     fn zeroize(&mut self) {
         match self {
             PrivateKey::Ed25519(key) => *key = SigningKey::from_bytes(&[0u8; 32]),
-            PrivateKey::Secp256k1(key) => key.non_secure_erase(),
+            PrivateKey::Secp256k1(key) => *key = k256::ecdsa::SigningKey::random(&mut OsRng),
             PrivateKey::P256(key) => *key = p256::ecdsa::SigningKey::random(&mut OsRng),
             PrivateKey::P384(key) => *key = p384::ecdsa::SigningKey::random(&mut OsRng),
             PrivateKey::Aes256(key) => key.zeroize(),
@@ -80,7 +80,7 @@ impl Drop for PrivateKey {
 #[derive(Clone, Copy)]
 pub enum PublicKey {
     Ed25519(ed25519_dalek::VerifyingKey),
-    Secp256k1(secp256k1::PublicKey),
+    Secp256k1(k256::ecdsa::VerifyingKey),
     P256(p256::ecdsa::VerifyingKey),
     P384(p384::ecdsa::VerifyingKey),
 }
@@ -179,13 +179,7 @@ impl From<ed25519_dalek::VerifyingKey> for PublicKey {
     }
 }
 
-impl From<secp256k1::PublicKey> for PublicKey {
-    fn from(pk: secp256k1::PublicKey) -> Self {
-        PublicKey::Secp256k1(pk)
-    }
-}
-
-impl TryFrom<PublicKey> for secp256k1::PublicKey {
+impl TryFrom<PublicKey> for k256::ecdsa::VerifyingKey {
     type Error = Error;
 
     fn try_from(value: PublicKey) -> std::result::Result<Self, Self::Error> {
@@ -297,7 +291,7 @@ impl PublicKey {
     }
 
     pub fn from_secp256k1_bytes(bytes: &[u8]) -> Result<PublicKey> {
-        let public_key = secp256k1::PublicKey::from_slice(bytes)?;
+        let public_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)?;
         Ok(PublicKey::Secp256k1(public_key))
     }
 
@@ -316,7 +310,7 @@ impl PublicKey {
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             PublicKey::Ed25519(public_key) => public_key.to_bytes().to_vec(),
-            PublicKey::Secp256k1(public_key) => public_key.serialize().to_vec(),
+            PublicKey::Secp256k1(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
             PublicKey::P256(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
             PublicKey::P384(public_key) => public_key.to_encoded_point(true).as_bytes().to_vec(),
         }
@@ -342,15 +336,8 @@ impl PublicKey {
                 Ok(())
             }
             PublicKey::Secp256k1(pubkey) => {
-                let secp = secp256k1::Secp256k1::new();
-
-                let mut hasher = sha2::Sha256::new();
-                hasher.update(data);
-                let hash = hasher.finalize();
-                let msg = secp256k1::Message::from_digest_slice(&hash)?;
-
-                let sig = secp256k1::ecdsa::Signature::from_compact(signature)?;
-                secp.verify_ecdsa(&msg, &sig, pubkey)?;
+                let sig = k256::ecdsa::Signature::from_slice(signature)?;
+                pubkey.verify(data, &sig)?;
                 Ok(())
             }
             PublicKey::P256(pubkey) => {
@@ -370,24 +357,9 @@ impl PublicKey {
 impl PublicKey {
     /// Verify the signature of the data from [`std::io::Read`] using [`PrivateKey`]
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
-        match self {
-            PublicKey::Ed25519(_) | PublicKey::P256(_) | PublicKey::P384(_) => {
-                let mut data = Vec::new();
-                reader.read_to_end(&mut data)?;
-                self.verify(&data, signature)
-            }
-            PublicKey::Secp256k1(key) => {
-                let secp = secp256k1::Secp256k1::new();
-                let mut hasher = sha2::Sha256::new();
-                io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize();
-                let msg = secp256k1::Message::from_digest_slice(&hash)?;
-
-                let sig = secp256k1::ecdsa::Signature::from_compact(signature)?;
-                secp.verify_ecdsa(&msg, &sig, key)?;
-                Ok(())
-            }
-        }
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        self.verify(&data, signature)
     }
 }
 /// [`PrivateKey`] Types
@@ -463,8 +435,7 @@ impl PrivateKey {
                 PrivateKey::Aes256(key_sized)
             }
             PrivateKeyType::Secp256k1 => {
-                let mut rng = secp256k1::rand::thread_rng();
-                PrivateKey::Secp256k1(secp256k1::SecretKey::new(&mut rng))
+                PrivateKey::Secp256k1(k256::ecdsa::SigningKey::random(&mut OsRng))
             }
             PrivateKeyType::P256 => PrivateKey::P256(p256::ecdsa::SigningKey::random(&mut OsRng)),
             PrivateKeyType::P384 => PrivateKey::P384(p384::ecdsa::SigningKey::random(&mut OsRng)),
@@ -486,7 +457,7 @@ impl PrivateKey {
                 .try_into()
                 .map(PrivateKey::Aes256)
                 .map_err(Error::from),
-            PrivateKeyType::Secp256k1 => secp256k1::SecretKey::from_slice(&key)
+            PrivateKeyType::Secp256k1 => k256::ecdsa::SigningKey::from_slice(&key)
                 .map(PrivateKey::Secp256k1)
                 .map_err(Error::from),
             PrivateKeyType::P256 => p256::ecdsa::SigningKey::from_slice(&key)
@@ -511,7 +482,7 @@ impl PrivateKey {
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             PrivateKey::Ed25519(kp) => kp.to_bytes().to_vec(),
-            PrivateKey::Secp256k1(sk) => sk.secret_bytes().to_vec(),
+            PrivateKey::Secp256k1(sk) => sk.to_bytes().as_slice().to_vec(),
             PrivateKey::P256(sk) => sk.to_bytes().as_slice().to_vec(),
             PrivateKey::P384(sk) => sk.to_bytes().as_slice().to_vec(),
             PrivateKey::Aes256(key) => key.to_vec(),
@@ -543,10 +514,7 @@ impl PrivateKey {
         match self {
             PrivateKey::Aes256(_) => Err(Error::Unsupported),
             PrivateKey::Ed25519(key) => Ok(key.verifying_key().into()),
-            PrivateKey::Secp256k1(pk) => {
-                let secp = secp256k1::Secp256k1::new();
-                Ok(secp256k1::PublicKey::from_secret_key(&secp, pk).into())
-            }
+            PrivateKey::Secp256k1(key) => Ok(PublicKey::Secp256k1(*key.verifying_key())),
             PrivateKey::P256(key) => Ok(PublicKey::P256(*key.verifying_key())),
             PrivateKey::P384(key) => Ok(PublicKey::P384(*key.verifying_key())),
         }
@@ -568,12 +536,8 @@ impl PrivateKey {
                 Ok(signature.to_bytes().to_vec())
             }
             PrivateKey::Secp256k1(key) => {
-                let secp = secp256k1::Secp256k1::new();
-                let mut hasher = sha2::Sha256::new();
-                hasher.update(data);
-                let hash = hasher.finalize();
-                let msg = secp256k1::Message::from_digest_slice(&hash)?;
-                Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
+                let signature: k256::ecdsa::Signature = key.try_sign(data)?;
+                Ok(signature.to_vec())
             }
             PrivateKey::P256(key) => {
                 let signature: p256::ecdsa::Signature = key.try_sign(data)?;
@@ -604,18 +568,10 @@ impl PrivateKey {
                 }
                 Ok(mac.finalize().into_bytes().to_vec())
             }
-            PrivateKey::Ed25519(_) | PrivateKey::P256(_) | PrivateKey::P384(_) => {
+            _ => {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
                 self.sign(&data)
-            }
-            PrivateKey::Secp256k1(key) => {
-                let secp = secp256k1::Secp256k1::new();
-                let mut hasher = sha2::Sha256::new();
-                io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize();
-                let msg = secp256k1::Message::from_digest_slice(&hash)?;
-                Ok(secp.sign_ecdsa(&msg, key).serialize_compact().to_vec())
             }
         }
     }
@@ -821,11 +777,10 @@ impl PrivateKey {
             CarrierKeyType::Direct { key } => Ok(Zeroizing::new(key.to_vec())),
             CarrierKeyType::Exchange { public_key } => match self {
                 PrivateKey::Aes256(key) => Ok(Zeroizing::new(key.to_vec())),
-                PrivateKey::Secp256k1(pk) => {
-                    let public_key: secp256k1::PublicKey = public_key.try_into()?;
-
-                    let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
-                    Ok(Zeroizing::new(shared_key.as_ref().to_vec()))
+                PrivateKey::Secp256k1(sk) => {
+                    let peer: k256::ecdsa::VerifyingKey = public_key.try_into()?;
+                    let shared = k256::ecdh::diffie_hellman(sk.as_nonzero_scalar(), peer.as_affine());
+                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
                 }
                 PrivateKey::Ed25519(_) => {
                     let static_key: x25519_dalek::StaticSecret = self.try_into()?;
@@ -847,13 +802,12 @@ impl PrivateKey {
             },
             CarrierKeyType::None => match self {
                 PrivateKey::Aes256(key) => Ok(Zeroizing::new(key.to_vec())),
-                PrivateKey::Secp256k1(pk) => {
-                    let public_key: secp256k1::PublicKey = {
-                        let secp = secp256k1::Secp256k1::new();
-                        secp256k1::PublicKey::from_secret_key(&secp, pk)
-                    };
-                    let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
-                    Ok(Zeroizing::new(shared_key.as_ref().to_vec()))
+                PrivateKey::Secp256k1(sk) => {
+                    let shared = k256::ecdh::diffie_hellman(
+                        sk.as_nonzero_scalar(),
+                        sk.verifying_key().as_affine(),
+                    );
+                    Ok(Zeroizing::new(shared.raw_secret_bytes().as_slice().to_vec()))
                 }
                 PrivateKey::Ed25519(_) => {
                     let static_key: x25519_dalek::StaticSecret = self.try_into()?;
