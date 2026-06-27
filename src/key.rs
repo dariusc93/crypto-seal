@@ -6,8 +6,8 @@ use aes_gcm::{
 };
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
-use ed25519_dalek::{SecretKey, Signature, SigningKey};
-use p256::ecdsa::signature::{Signer as _, Verifier as _};
+use ed25519_dalek::{Signature, SigningKey};
+use signature::{Signer as _, Verifier as _};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use rand::rngs::OsRng;
@@ -445,11 +445,7 @@ impl PrivateKey {
     /// Generate a [`PrivateKey`] using [`PrivateKeyType`]
     pub fn new_with(key_type: PrivateKeyType) -> Self {
         match key_type {
-            PrivateKeyType::Ed25519 => {
-                let mut secret = SecretKey::default();
-                OsRng.fill_bytes(&mut secret);
-                PrivateKey::Ed25519(SigningKey::from_bytes(&secret))
-            }
+            PrivateKeyType::Ed25519 => PrivateKey::Ed25519(SigningKey::generate(&mut OsRng)),
             PrivateKeyType::Aes256 => {
                 let key_sized = generate::<32>();
                 PrivateKey::Aes256(key_sized)

@@ -2,6 +2,7 @@
 mod test {
     use crypto_seal::key::PrivateKey;
     use crypto_seal::key::PrivateKeyType;
+    use crypto_seal::key::PublicKey;
 
     #[test]
     fn aes256_encryption() -> anyhow::Result<()> {
@@ -113,6 +114,7 @@ mod test {
         let signature = private_key.sign(plaintext)?;
 
         assert!(private_key.verify(plaintext, &signature).is_ok());
+        assert!(private_key.verify(b"tampered", &signature).is_err());
         Ok(())
     }
 
@@ -125,6 +127,7 @@ mod test {
         let signature = private_key.sign(plaintext)?;
 
         assert!(private_key.verify(plaintext, &signature).is_ok());
+        assert!(private_key.verify(b"tampered", &signature).is_err());
 
         Ok(())
     }
@@ -135,6 +138,7 @@ mod test {
         let plaintext = b"Hello, World!";
         let signature = private_key.sign(plaintext)?;
         assert!(private_key.verify(plaintext, &signature).is_ok());
+        assert!(private_key.verify(b"tampered", &signature).is_err());
         Ok(())
     }
 
@@ -144,6 +148,7 @@ mod test {
         let plaintext = b"Hello, World!";
         let signature = private_key.sign(plaintext)?;
         assert!(private_key.verify(plaintext, &signature).is_ok());
+        assert!(private_key.verify(b"tampered", &signature).is_err());
         Ok(())
     }
 
@@ -152,6 +157,21 @@ mod test {
         let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
         assert!(private_key.decrypt(&[], Default::default()).is_err());
         assert!(private_key.decrypt(&[0u8; 4], Default::default()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn public_key_encode_decode_roundtrip() -> anyhow::Result<()> {
+        for key_type in [
+            PrivateKeyType::Ed25519,
+            PrivateKeyType::Secp256k1,
+            PrivateKeyType::P256,
+            PrivateKeyType::P384,
+        ] {
+            let public_key = PrivateKey::new_with(key_type).public_key()?;
+            let decoded = PublicKey::decode(&public_key.encode())?;
+            assert_eq!(public_key, decoded);
+        }
         Ok(())
     }
 
