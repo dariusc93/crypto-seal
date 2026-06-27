@@ -46,6 +46,35 @@ mod test {
     }
 
     #[test]
+    fn aes256_sign() -> anyhow::Result<()> {
+        let private_key = PrivateKey::new_with(PrivateKeyType::Aes256);
+        let plaintext = b"Hello, World!";
+        let signature = private_key.sign(plaintext)?;
+        assert!(private_key.verify(plaintext, &signature).is_ok());
+        assert!(private_key.verify(b"tampered", &signature).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn stream_roundtrip() -> anyhow::Result<()> {
+        use std::io::Cursor;
+        for key_type in [
+            PrivateKeyType::Ed25519,
+            PrivateKeyType::Secp256k1,
+            PrivateKeyType::Aes256,
+        ] {
+            let key = PrivateKey::new_with(key_type);
+            let plaintext = vec![7u8; 5000];
+            let mut ciphertext = Vec::new();
+            key.encrypt_stream(&mut Cursor::new(&plaintext), &mut ciphertext, Default::default())?;
+            let mut decrypted = Vec::new();
+            key.decrypt_stream(&mut Cursor::new(&ciphertext), &mut decrypted, Default::default())?;
+            assert_eq!(plaintext, decrypted);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn ed25519_sign() -> anyhow::Result<()> {
         let private_key = PrivateKey::new_with(PrivateKeyType::Ed25519);
 

@@ -1,18 +1,23 @@
 use crate::{error::Error, Result};
 use aes_gcm::{
     aead::stream::{DecryptorBE32, EncryptorBE32},
-    aead::Aead,
+    aead::{Aead, Payload},
     Aes256Gcm, Key, KeyInit, Nonce,
 };
 use core::hash::Hash;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{SecretKey, Signature, Signer, SigningKey, Verifier};
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
+use sha2::Sha256;
 use sha2::Sha512;
 use std::io;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Container of private keys
 /// The following is supported
@@ -477,6 +482,11 @@ impl Default for PrivateKeyType {
 
 const WRITE_BUFFER_SIZE: usize = 512;
 const READ_BUFFER_SIZE: usize = 528;
+const NONCE_LEN: usize = 12;
+const SALT_LEN: usize = 16;
+const ENCRYPT_INFO: &[u8] = b"crypto-seal:aes256-gcm:v1";
+const ENCRYPT_STREAM_INFO: &[u8] = b"crypto-seal:aes256-gcm-stream:v1";
+const MAC_INFO: &[u8] = b"crypto-seal:hmac-sha256:v1";
 
 impl TryFrom<u8> for PrivateKeyType {
     type Error = Error;
@@ -611,12 +621,12 @@ impl PrivateKey {
     pub fn sign<B: AsRef<[u8]>>(&self, data: B) -> Result<Vec<u8>> {
         let data = data.as_ref();
         match self {
-            PrivateKey::Aes256(_) => {
-                let mut hasher = sha2::Sha512::new();
-                hasher.update(data);
-                let hash = hasher.finalize().to_vec();
-                let enc_hash = self.encrypt(&hash, Default::default())?;
-                Ok(enc_hash)
+            PrivateKey::Aes256(key) => {
+                let mac_key = derive_key(key, &[], MAC_INFO)?;
+                let mut mac =
+                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::EncryptionError)?;
+                mac.update(data);
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             PrivateKey::Ed25519(key) => {
                 let signature = key.sign(data);
@@ -638,12 +648,20 @@ impl PrivateKey {
     //TODO: Use HMAC for AES
     pub fn sign_reader(&self, reader: &mut impl io::Read) -> Result<Vec<u8>> {
         match self {
-            PrivateKey::Aes256(_) => {
-                let mut hasher: Sha512 = Sha512::new();
-                io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize().to_vec();
-                let enc_hash = self.encrypt(&hash, Default::default())?;
-                Ok(enc_hash)
+            PrivateKey::Aes256(key) => {
+                let mac_key = derive_key(key, &[], MAC_INFO)?;
+                let mut mac =
+                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::EncryptionError)?;
+                let mut buffer = [0u8; WRITE_BUFFER_SIZE];
+                loop {
+                    match reader.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(n) => mac.update(&buffer[..n]),
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(Error::from(e)),
+                    }
+                }
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             PrivateKey::Ed25519(key) => {
                 let mut hasher: Sha512 = Sha512::new();
@@ -668,15 +686,12 @@ impl PrivateKey {
     //TODO: Use HMAC for AES
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         match self {
-            PrivateKey::Aes256(_) => {
-                let mut hasher: Sha512 = Sha512::new();
-                hasher.update(data);
-                let hash = hasher.finalize().to_vec();
-                let dec_hash = self.decrypt(signature, Default::default())?;
-                if dec_hash == hash {
-                    return Ok(());
-                }
-                Err(Error::InvalidSignature)
+            PrivateKey::Aes256(key) => {
+                let mac_key = derive_key(key, &[], MAC_INFO)?;
+                let mut mac =
+                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::InvalidSignature)?;
+                mac.update(data);
+                mac.verify_slice(signature).map_err(|_| Error::InvalidSignature)
             }
             _ => {
                 let public_key = self.public_key()?;
@@ -690,15 +705,20 @@ impl PrivateKey {
     //TODO: Use HMAC for AES
     pub fn verify_reader(&self, reader: &mut impl io::Read, signature: &[u8]) -> Result<()> {
         match self {
-            PrivateKey::Aes256(_) => {
-                let mut hasher: Sha512 = Sha512::new();
-                io::copy(reader, &mut hasher)?;
-                let hash = hasher.finalize().to_vec();
-                let dec_hash = self.decrypt(signature, Default::default())?;
-                if dec_hash == hash {
-                    return Ok(());
+            PrivateKey::Aes256(key) => {
+                let mac_key = derive_key(key, &[], MAC_INFO)?;
+                let mut mac =
+                    <HmacSha256 as Mac>::new_from_slice(&*mac_key).map_err(|_| Error::InvalidSignature)?;
+                let mut buffer = [0u8; WRITE_BUFFER_SIZE];
+                loop {
+                    match reader.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(n) => mac.update(&buffer[..n]),
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(Error::from(e)),
+                    }
                 }
-                Err(Error::InvalidSignature)
+                mac.verify_slice(signature).map_err(|_| Error::InvalidSignature)
             }
             _ => {
                 let public_key = self.public_key()?;
@@ -727,31 +747,52 @@ impl PrivateKey {
     /// Encrypt the data using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn encrypt(&self, data: &[u8], pubkey: CarrierKeyType) -> Result<Vec<u8>> {
-        let key = self.fetch_encryption_key(pubkey)?;
-        let raw_nonce = generate::<12>();
-        let key = Key::<Aes256Gcm>::from_slice(&key);
+        self.encrypt_with_aad(data, pubkey, &[])
+    }
+
+    pub fn encrypt_with_aad(
+        &self,
+        data: &[u8],
+        pubkey: CarrierKeyType,
+        aad: &[u8],
+    ) -> Result<Vec<u8>> {
+        let ikm = self.fetch_encryption_key(pubkey)?;
+        let salt = generate::<SALT_LEN>();
+        let key = derive_key(ikm.as_slice(), &salt, ENCRYPT_INFO)?;
+        let raw_nonce = generate::<NONCE_LEN>();
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*key));
         let nonce = Nonce::from_slice(&raw_nonce);
-        let cipher = Aes256Gcm::new(key);
-        let mut data = cipher
-            .encrypt(nonce, data)
+        let mut out = cipher
+            .encrypt(nonce, Payload { msg: data, aad })
             .map_err(|_| Error::EncryptionError)?;
-        data.extend(nonce);
-        Ok(data)
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&raw_nonce);
+        Ok(out)
     }
 
     /// Decrypt the data using [`PrivateKey`].
     /// If [`PrivateKeyType::Aes256`] is used, the `pubkey` will be ignored
     pub fn decrypt(&self, data: &[u8], pubkey: CarrierKeyType) -> Result<Vec<u8>> {
-        if data.len() < 12 {
+        self.decrypt_with_aad(data, pubkey, &[])
+    }
+
+    pub fn decrypt_with_aad(
+        &self,
+        data: &[u8],
+        pubkey: CarrierKeyType,
+        aad: &[u8],
+    ) -> Result<Vec<u8>> {
+        if data.len() < SALT_LEN + NONCE_LEN {
             return Err(Error::DecryptionError);
         }
-        let key = self.fetch_encryption_key(pubkey)?;
-        let (nonce, data) = extract_data_slice(data, 12);
-        let key = Key::<Aes256Gcm>::from_slice(&key);
-        let nonce = Nonce::from_slice(nonce);
-        let cipher = Aes256Gcm::new(key);
+        let ikm = self.fetch_encryption_key(pubkey)?;
+        let (rest, raw_nonce) = data.split_at(data.len() - NONCE_LEN);
+        let (ciphertext, salt) = rest.split_at(rest.len() - SALT_LEN);
+        let key = derive_key(ikm.as_slice(), salt, ENCRYPT_INFO)?;
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*key));
+        let nonce = Nonce::from_slice(raw_nonce);
         cipher
-            .decrypt(nonce, data)
+            .decrypt(nonce, Payload { msg: ciphertext, aad })
             .map_err(|_| Error::DecryptionError)
     }
 }
@@ -765,13 +806,15 @@ impl PrivateKey {
         writer: &mut impl io::Write,
         pubkey: CarrierKeyType,
     ) -> Result<()> {
-        let key = self.fetch_encryption_key(pubkey)?;
+        let ikm = self.fetch_encryption_key(pubkey)?;
+        let salt = generate::<SALT_LEN>();
+        let key = derive_key(ikm.as_slice(), &salt, ENCRYPT_STREAM_INFO)?;
         let nonce = generate::<7>();
 
-        let key = Key::<Aes256Gcm>::from_slice(&key);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*key));
         let mut buffer = [0u8; WRITE_BUFFER_SIZE];
         let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+        writer.write_all(&salt)?;
         writer.write_all(&nonce)?;
         loop {
             match reader.read(&mut buffer) {
@@ -803,12 +846,14 @@ impl PrivateKey {
         writer: &mut impl io::Write,
         pubkey: CarrierKeyType,
     ) -> Result<()> {
-        let key = self.fetch_encryption_key(pubkey)?;
+        let ikm = self.fetch_encryption_key(pubkey)?;
+        let mut salt = [0u8; SALT_LEN];
+        reader.read_exact(&mut salt)?;
+        let key = derive_key(ikm.as_slice(), &salt, ENCRYPT_STREAM_INFO)?;
         let mut nonce = vec![0u8; 7];
         reader.read_exact(&mut nonce)?;
 
-        let key = Key::<Aes256Gcm>::from_slice(&key);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*key));
 
         let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
         let mut buffer = [0u8; READ_BUFFER_SIZE];
@@ -838,52 +883,53 @@ impl PrivateKey {
     }
 
     /// Used internally to obtain the encryption key
-    fn fetch_encryption_key(&self, pubkey: CarrierKeyType) -> Result<Vec<u8>> {
+    fn fetch_encryption_key(&self, pubkey: CarrierKeyType) -> Result<Zeroizing<Vec<u8>>> {
         match pubkey {
-            CarrierKeyType::Direct { key } => Ok(key.to_vec()),
+            CarrierKeyType::Direct { key } => Ok(Zeroizing::new(key.to_vec())),
             CarrierKeyType::Exchange { public_key } => match self {
-                PrivateKey::Aes256(key) => Ok(key.to_vec()),
+                PrivateKey::Aes256(key) => Ok(Zeroizing::new(key.to_vec())),
                 PrivateKey::Secp256k1(pk) => {
                     let public_key: secp256k1::PublicKey = public_key.try_into()?;
 
                     let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
-                    Ok(shared_key.as_ref().to_vec())
+                    Ok(Zeroizing::new(shared_key.as_ref().to_vec()))
                 }
                 PrivateKey::Ed25519(_) => {
                     let static_key: x25519_dalek::StaticSecret = self.try_into()?;
                     let public_key: x25519_dalek::PublicKey = public_key.try_into()?;
 
                     let enc_key = static_key.diffie_hellman(&public_key);
-                    Ok(enc_key.as_bytes().to_vec())
+                    Ok(Zeroizing::new(enc_key.as_bytes().to_vec()))
                 }
             },
             CarrierKeyType::None => match self {
-                PrivateKey::Aes256(key) => Ok(key.to_vec()),
+                PrivateKey::Aes256(key) => Ok(Zeroizing::new(key.to_vec())),
                 PrivateKey::Secp256k1(pk) => {
                     let public_key: secp256k1::PublicKey = {
                         let secp = secp256k1::Secp256k1::new();
                         secp256k1::PublicKey::from_secret_key(&secp, pk)
                     };
                     let shared_key = secp256k1::ecdh::SharedSecret::new(&public_key, pk);
-                    Ok(shared_key.as_ref().to_vec())
+                    Ok(Zeroizing::new(shared_key.as_ref().to_vec()))
                 }
                 PrivateKey::Ed25519(_) => {
                     let static_key: x25519_dalek::StaticSecret = self.try_into()?;
                     let public_key: x25519_dalek::PublicKey =
                         x25519_dalek::PublicKey::from(&static_key);
                     let enc_key = static_key.diffie_hellman(&public_key);
-                    Ok(enc_key.as_bytes().to_vec())
+                    Ok(Zeroizing::new(enc_key.as_bytes().to_vec()))
                 }
             },
         }
     }
 }
 
-/// Used internally to split data based on the supplied sized.
-fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
-    let extracted = &data[data.len() - size..];
-    let payload = &data[..data.len() - size];
-    (extracted, payload)
+fn derive_key(ikm: &[u8], salt: &[u8], info: &[u8]) -> Result<Zeroizing<[u8; 32]>> {
+    let mut okm = Zeroizing::new([0u8; 32]);
+    Hkdf::<Sha256>::new(Some(salt), ikm)
+        .expand(info, &mut *okm)
+        .map_err(|_| Error::EncryptionError)?;
+    Ok(okm)
 }
 
 /// Used to generate random amount of data and store it in a Vec with a specific capacity

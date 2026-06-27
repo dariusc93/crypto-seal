@@ -39,6 +39,16 @@ impl RecipientCarrier {
     }
 }
 
+fn recipients_aad(ephemeral: &PublicKey, recipients: &[PublicKey]) -> Vec<u8> {
+    let mut keys = recipients.iter().map(PublicKey::encode).collect::<Vec<_>>();
+    keys.sort();
+    let mut aad = ephemeral.encode();
+    for key in keys {
+        aad.extend_from_slice(&key);
+    }
+    aad
+}
+
 pub trait ToSeal {
     /// Consume and encrypt a [`serde::Serialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
     fn seal(self) -> Result<(PrivateKey, Package<Self>)>;
@@ -214,33 +224,40 @@ where
         let signed = serde_json::to_vec(&signed)?;
 
         let data_key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
-        let data = private_key.encrypt(&signed, key::CarrierKeyType::Direct { key: data_key })?;
 
         let ephemeral = PrivateKey::new_with(match ptype {
             PublicKeyType::Ed25519 => PrivateKeyType::Ed25519,
             PublicKeyType::Secp256k1 => PrivateKeyType::Secp256k1,
         });
+        let ephemeral_pub = ephemeral.public_key()?;
 
-        package.data = data;
-        package.recipients = RecipientCarrier::Bundle {
-            public_keys: HashMap::from_iter(
-                public_key
-                    .iter()
-                    .filter(|public_key| public_key.key_type() == ptype)
-                    .filter_map(|public_key| {
-                        ephemeral
-                            .encrypt(
-                                &data_key,
-                                key::CarrierKeyType::Exchange {
-                                    public_key: *public_key,
-                                },
-                            )
-                            .map(|data| (*public_key, data))
-                            .ok()
-                    }),
-            ),
-        };
-        package.public_key = Some(ephemeral.public_key()?);
+        let public_keys = HashMap::from_iter(
+            public_key
+                .iter()
+                .filter(|public_key| public_key.key_type() == ptype)
+                .filter_map(|public_key| {
+                    ephemeral
+                        .encrypt(
+                            &data_key,
+                            key::CarrierKeyType::Exchange {
+                                public_key: *public_key,
+                            },
+                        )
+                        .map(|data| (*public_key, data))
+                        .ok()
+                }),
+        );
+
+        let recipients = public_keys.keys().copied().collect::<Vec<_>>();
+        let aad = recipients_aad(&ephemeral_pub, &recipients);
+
+        package.data = private_key.encrypt_with_aad(
+            &signed,
+            key::CarrierKeyType::Direct { key: data_key },
+            &aad,
+        )?;
+        package.recipients = RecipientCarrier::Bundle { public_keys };
+        package.public_key = Some(ephemeral_pub);
         Ok(package)
     }
 }
@@ -283,11 +300,13 @@ where
             },
         )?;
 
-        let signed = key.decrypt(
+        let aad = recipients_aad(ephemeral, &self.recipients());
+        let signed = key.decrypt_with_aad(
             &self.data,
             key::CarrierKeyType::Direct {
                 key: data_key.as_slice().try_into()?,
             },
+            &aad,
         )?;
         let signed: Signed = serde_json::from_slice(&signed)?;
 

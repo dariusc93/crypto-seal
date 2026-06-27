@@ -251,6 +251,25 @@ mod test {
     }
 
     #[test]
+    fn shared_recipient_tampering_fails_open() -> anyhow::Result<()> {
+        use crypto_seal::ToOpenWithPublicKey;
+        use crypto_seal::ToSealRefWithSharedKey;
+        let alice = PrivateKey::new();
+        let bob = PrivateKey::new();
+        let john = PrivateKey::new();
+        let sealed =
+            String::from("Hello!").seal(&alice, vec![bob.public_key()?, john.public_key()?])?;
+        let mut value: serde_json::Value = serde_json::from_slice(&sealed.to_bytes()?)?;
+        let bundle = value["recipients"]["bundle"]["public_keys"]
+            .as_object_mut()
+            .expect("bundle");
+        bundle.remove(&john.public_key()?.to_string());
+        let tampered = Package::<String>::from_bytes(serde_json::to_vec(&value)?)?;
+        assert!(tampered.open(&bob).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn tampered_ciphertext_fails_open() -> anyhow::Result<()> {
         use crypto_seal::ToOpen;
         use crypto_seal::ToSealWithKey;
