@@ -152,6 +152,16 @@ mod test {
     }
 
     #[test]
+    fn non_recipient_cannot_open() -> anyhow::Result<()> {
+        let alice = PrivateKey::new();
+        let bob = PrivateKey::new();
+        let charlie = PrivateKey::new();
+        let sealed = String::from("Hello, Bob!").seal_shared(&alice, vec![bob.public_key()?])?;
+        assert!(sealed.open(&charlie).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn seal_shared_rejects_mismatched_recipient_type() -> anyhow::Result<()> {
         let alice = PrivateKey::new_with(PrivateKeyType::Ed25519);
         let bob = PrivateKey::new_with(PrivateKeyType::Secp256k1);
@@ -168,6 +178,7 @@ mod test {
         let bytes = sealed.to_bytes()?;
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains(&alice.public_key()?.to_string()));
+        assert_eq!(String::from("Hello, Bob!"), sealed.open(&bob)?);
         Ok(())
     }
 
@@ -203,6 +214,30 @@ mod test {
         let bytes = serde_json::to_vec(&value)?;
         let tampered: Package<String> = Json::deserialize(&bytes)?;
         assert!(tampered.open(&key).is_err());
+        Ok(())
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn json_roundtrip() -> anyhow::Result<()> {
+        use crypto_seal::format::{json::Json, Format};
+        let (key, sealed) = String::from("Hello, World!").seal()?;
+        let bytes = Json::serialize(&sealed)?;
+        let decoded: Package<String> = Json::deserialize(&bytes)?;
+        assert_eq!(String::from("Hello, World!"), decoded.open(&key)?);
+        Ok(())
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn cross_format_mismatch_fails() -> anyhow::Result<()> {
+        use crypto_seal::format::{json::Json, Format};
+        let (key, sealed) = String::from("Hello, World!").seal()?;
+        let postcard_bytes = sealed.to_bytes()?;
+        let json_bytes = Json::serialize(&sealed)?;
+        assert!(Json::deserialize::<Package<String>>(&postcard_bytes).is_err());
+        let mismatched = Package::<String>::from_bytes(&json_bytes);
+        assert!(mismatched.is_err() || mismatched.unwrap().open(&key).is_err());
         Ok(())
     }
 

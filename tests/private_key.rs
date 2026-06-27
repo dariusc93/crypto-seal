@@ -47,10 +47,19 @@ mod test {
 
     #[test]
     fn encrypt_tamper_fails() -> anyhow::Result<()> {
-        let key = PrivateKey::new_with(PrivateKeyType::Aes256);
-        let mut ciphertext = key.encrypt(b"secret", Default::default())?;
-        ciphertext[0] ^= 0xff;
-        assert!(key.decrypt(&ciphertext, Default::default()).is_err());
+        for key_type in [
+            PrivateKeyType::Ed25519,
+            PrivateKeyType::Secp256k1,
+            PrivateKeyType::Aes256,
+        ] {
+            let key = PrivateKey::new_with(key_type);
+            let base = key.encrypt(b"secret", Default::default())?;
+            for pos in [0, base.len() - 13, base.len() - 1] {
+                let mut tampered = base.clone();
+                tampered[pos] ^= 0xff;
+                assert!(key.decrypt(&tampered, Default::default()).is_err());
+            }
+        }
         Ok(())
     }
 
