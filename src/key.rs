@@ -149,16 +149,9 @@ impl Default for PrivateKey {
 impl Zeroize for PrivateKey {
     fn zeroize(&mut self) {
         match self {
-            PrivateKey::Ed25519(_) => {
-                //Note: Due to trait bounds, we cannot call it directly,
-                //      but it will still be called when it is dropped
-            }
-            PrivateKey::Secp256k1(_kp) => {
-                //TODO: Zeroize or destroy key
-            }
-            PrivateKey::Aes256(key) => {
-                key.zeroize();
-            }
+            PrivateKey::Ed25519(key) => *key = SigningKey::from_bytes(&[0u8; 32]),
+            PrivateKey::Secp256k1(key) => key.non_secure_erase(),
+            PrivateKey::Aes256(key) => key.zeroize(),
         }
     }
 }
