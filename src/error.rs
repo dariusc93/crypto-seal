@@ -1,5 +1,6 @@
+use core::array::TryFromSliceError;
 use ed25519_dalek::SignatureError;
-use std::array::TryFromSliceError;
+#[cfg(feature = "std")]
 use std::io;
 use thiserror::Error;
 
@@ -17,32 +18,37 @@ pub enum Error {
     DecryptionStreamError,
     #[error("Invalid Signature")]
     InvalidSignature,
-    #[error("Invalid Package")]
-    InvalidPackage,
     #[error("Invalid public key")]
-    InvalidPublickey,
+    InvalidPublicKey,
     #[error("Invalid private key")]
-    InvalidPrivatekey,
+    InvalidPrivateKey,
     #[error("Recipients was not set or available")]
     RecipientsNotAvailable,
     #[error("Unable to convert slice: {0}")]
     InvalidLength(#[from] TryFromSliceError),
-    #[error(transparent)]
-    SignatureError(#[from] SignatureError),
-    #[error(transparent)]
-    Secp256k1Error(#[from] secp256k1::Error),
+    #[error("{0}")]
+    SignatureError(SignatureError),
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     #[error(transparent)]
     IoError(#[from] io::Error),
+    #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
+    #[error("{0}")]
+    SerdeJsonError(serde_json::Error),
     #[error(transparent)]
-    SerdeJsonError(#[from] serde_json::Error),
-    #[error(transparent)]
-    Base58EncodeError(#[from] bs58::encode::Error),
-    #[error(transparent)]
-    Base58DecodeError(#[from] bs58::decode::Error),
-    #[cfg(feature = "libp2p-identity")]
-    #[error(transparent)]
-    OtherVariantError(#[from] libp2p_identity::OtherVariantError),
-    #[cfg(feature = "libp2p-identity")]
-    #[error(transparent)]
-    DecodingError(#[from] libp2p_identity::DecodingError),
+    PostcardError(#[from] postcard::Error),
+}
+
+impl From<SignatureError> for Error {
+    fn from(value: SignatureError) -> Self {
+        Error::SignatureError(value)
+    }
+}
+
+#[cfg(feature = "json")]
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
+        Error::SerdeJsonError(value)
+    }
 }

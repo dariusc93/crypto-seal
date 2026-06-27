@@ -6,27 +6,47 @@ crypto-seal is a small utility designed to securely "package" or seal serde-comp
 
 ## Usage
 
-*Note: ED25519 is used by default for encryption and signing. If AES256-GCM is used, signing will only supply an encrypted SHA512 hash using the key. This will be replaced in the future as this may not be a desirable option*
+*Note: ED25519 is the default key type. The supported key types are ED25519, secp256k1, P-256, P-384, and AES-256. With the AES-256 key type, signing uses HMAC-SHA256 (with a MAC key derived separately from the encryption key), which is a symmetric authenticator and is not publicly verifiable like the elliptic-curve signatures.*
 
 ```rust
-use crypto_seal::{ToOpen, ToSeal, error::Error};
+use crypto_seal::{Seal, error::Error};
 
 fn main() -> Result<(), Error> {
 
-    let my_data = b"Hello, World!";
+    let my_data = String::from("Hello, World!");
 
     let (my_key, sealed_data) = my_data.seal()?;
 
     let unsealed_data = sealed_data.open(&my_key)?;
 
-    assert_eq!(b"Hello, World!", &unsealed_data);
+    assert_eq!(my_data, unsealed_data);
+    Ok(())
+}
+```
+
+### Sharing with recipients
+
+```rust
+use crypto_seal::{Seal, Package, key::PrivateKey, error::Error};
+
+fn main() -> Result<(), Error> {
+    let alice = PrivateKey::new();
+    let bob = PrivateKey::new();
+
+    let sealed = String::from("Hello, Bob!").seal_shared(&alice, vec![bob.public_key()?])?;
+    let bytes = sealed.to_bytes()?;
+
+    let received = Package::<String>::from_bytes(bytes)?;
+    let message = received.open_shared(&bob, &alice.public_key()?)?;
+
+    assert_eq!(String::from("Hello, Bob!"), message);
     Ok(())
 }
 ```
 
 ## MSRV
 
-The minimum supported rust version is 1.74, which can be changed in the future. There is no guarantee that this library will work on older versions of rust.
+The minimum supported rust version is 1.93, which can be changed in the future. There is no guarantee that this library will work on older versions of rust.
 
 
 ## License

@@ -1,274 +1,270 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 pub mod error;
+pub mod format;
 pub mod key;
 
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashMap;
 
 use crate::error::Error;
-use crate::key::{PrivateKey, PublicKey};
+use crate::format::postcard::Postcard;
+use crate::format::Format;
+use crate::key::{PrivateKey, PrivateKeyType, PublicKey, PublicKeyType};
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
-#[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum RecipientCarrier {
-    Direct {
-        public_key: PublicKey,
-    },
-    Bundle {
-        public_keys: HashMap<PublicKey, Vec<u8>>,
-    },
-    #[default]
-    None,
+fn recipients_aad(ephemeral: &PublicKey, recipients: &BTreeMap<PublicKey, Vec<u8>>) -> Vec<u8> {
+    let mut entries = recipients
+        .iter()
+        .map(|(public_key, wrapped)| (public_key.encode(), wrapped))
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut aad = ephemeral.encode();
+    for (key, wrapped) in entries {
+        aad.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        aad.extend_from_slice(&key);
+        aad.extend_from_slice(&(wrapped.len() as u64).to_le_bytes());
+        aad.extend_from_slice(wrapped);
+    }
+    aad
 }
 
-impl RecipientCarrier {
-    fn recipients(&self) -> Vec<PublicKey> {
-        match self {
-            RecipientCarrier::Direct { public_key } => vec![*public_key],
-            RecipientCarrier::Bundle { public_keys } => {
-                public_keys.keys().copied().collect::<Vec<_>>()
-            }
-            RecipientCarrier::None => vec![],
+fn signing_transcript(data: &[u8], aad: &[u8]) -> Vec<u8> {
+    let mut transcript = Vec::with_capacity(16 + data.len() + aad.len());
+    transcript.extend_from_slice(&(data.len() as u64).to_le_bytes());
+    transcript.extend_from_slice(data);
+    transcript.extend_from_slice(&(aad.len() as u64).to_le_bytes());
+    transcript.extend_from_slice(aad);
+    transcript
+}
+
+pub trait Seal: Sized {
+    /// Encrypt with a freshly generated [`PrivateKey`], returning it alongside the [`Package`]
+    fn seal(&self) -> Result<(PrivateKey, Package<Self>)>;
+
+    /// Encrypt with the supplied [`PrivateKey`]
+    fn seal_with(&self, private_key: &PrivateKey) -> Result<Package<Self>>;
+
+    /// Encrypt for the given recipients using the supplied sender [`PrivateKey`]
+    fn seal_shared(
+        &self,
+        private_key: &PrivateKey,
+        recipients: Vec<PublicKey>,
+    ) -> Result<Package<Self>>;
+}
+
+#[derive(Deserialize, Serialize)]
+struct Signed {
+    data: Vec<u8>,
+    public_key: Option<PublicKey>,
+    signature: Vec<u8>,
+}
+
+#[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct Package<T, F = Postcard> {
+    data: Vec<u8>,
+    public_key: Option<PublicKey>,
+    recipients: BTreeMap<PublicKey, Vec<u8>>,
+    #[serde(skip)]
+    marker0: PhantomData<T>,
+    #[serde(skip)]
+    marker1: PhantomData<F>,
+}
+
+impl<T, F> Default for Package<T, F> {
+    fn default() -> Self {
+        Self {
+            data: Vec::new(),
+            public_key: None,
+            recipients: BTreeMap::new(),
+            marker0: PhantomData,
+            marker1: PhantomData,
         }
     }
-
-    fn is_none(&self) -> bool {
-        matches!(self, RecipientCarrier::None)
-    }
 }
 
-pub trait ToSeal {
-    /// Consume and encrypt a [`serde::Serialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
-    fn seal(self) -> Result<(PrivateKey, Package<Self>)>;
-}
-
-pub trait ToSealRef {
-    /// Borrow and encrypt a [`serde::Serialize`] compatible type and return a [`Package`] along with a generated [`PrivateKey`]
-    fn seal(&self) -> Result<(PrivateKey, Package<Self>)>;
-}
-
-pub trait ToSealWithKey {
-    /// Consume and encrypt a [`serde::Serialize`] compatible type with the supplied [`PrivateKey`] and return a [`Package`]
-    fn seal(self, private_key: &PrivateKey) -> Result<Package<Self>>;
-}
-
-pub trait ToSealRefWithKey {
-    /// Borrow and encrypt a [`serde::Serialize`] compatible type with the supplied [`PrivateKey`] and return a [`Package`]
-    fn seal(&self, private_key: &PrivateKey) -> Result<Package<Self>>;
-}
-
-pub trait ToSealWithSharedKey {
-    /// Consume and encrypt a [`serde::Serialize`] compatible type with a [`PrivateKey`] using the multiple [`PublicKey`] and return a [`Package`]
-    fn seal(self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<Self>>;
-}
-
-pub trait ToSealRefWithSharedKey {
-    /// Borrow and encrypt a [`serde::Serialize`] compatible type with a [`PrivateKey`] using the multiple [`PublicKey`] and return a [`Package`]
-    fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<Self>>;
-}
-
-pub trait ToOpen<T> {
-    /// Decrypts [`Package`] using [`PrivateKey`] and returns defined type
-    fn open(&self, key: &PrivateKey) -> Result<T>;
-}
-
-pub trait ToOpenWithPublicKey<T> {
-    /// Decrypts [`Package`] using [`PrivateKey`] and internal [`PublicKey`] and returns defined type
-    fn open(&self, key: &PrivateKey) -> Result<T>;
-}
-
-pub trait ToOpenWithSharedKey<T> {
-    /// Decrypts [`Package`] using [`PrivateKey`] using the recipient [`PublicKey`] and returns defined type
-    fn open(&self, key: &PrivateKey, public_key: &PublicKey) -> Result<T>;
-}
-
-#[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
-pub struct Package<T: ?Sized> {
-    data: Vec<u8>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    signature: Vec<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    public_key: Option<PublicKey>,
-    #[serde(default, skip_serializing_if = "RecipientCarrier::is_none")]
-    recipients: RecipientCarrier,
-    #[serde(skip_serializing, skip_deserializing)]
-    marker: PhantomData<T>,
-}
-
-impl<T> Package<T>
-where
-    T: Serialize + DeserializeOwned + Clone,
-{
+impl<T, F> Package<T, F> {
     pub fn import(
         data: Vec<u8>,
         public_key: Option<PublicKey>,
-        recipients: RecipientCarrier,
-        signature: Option<Vec<u8>>,
+        recipients: BTreeMap<PublicKey, Vec<u8>>,
     ) -> Self {
-        let signature = signature.unwrap_or_default();
         Self {
             data,
-            signature,
             public_key,
             recipients,
-            marker: PhantomData,
+            marker0: PhantomData,
+            marker1: PhantomData,
         }
     }
 
-    pub fn from_bytes<A: AsRef<[u8]>>(data: A) -> Result<Self> {
-        serde_json::from_slice(data.as_ref()).map_err(Error::from)
-    }
-
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self).map_err(Error::from)
-    }
-}
-
-impl<T> Package<T> {
     pub fn has_recipient(&self, public_key: &PublicKey) -> bool {
-        let list = self.recipients();
-        list.contains(public_key)
+        self.recipients.contains_key(public_key)
     }
 
     pub fn recipients(&self) -> Vec<PublicKey> {
-        self.recipients.recipients()
+        self.recipients.keys().copied().collect::<Vec<_>>()
     }
 }
 
-impl<T> ToSeal for T
+impl<T, F> Package<T, F>
 where
-    T: Serialize + Default,
+    T: Serialize,
+    F: Format,
 {
-    fn seal(self) -> Result<(PrivateKey, Package<T>)> {
-        ToSealRef::seal(&self)
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        F::serialize(self)
     }
 }
 
-impl<T> ToSealRef for T
+impl<T, F> Package<T, F>
 where
-    T: Serialize + Default,
+    T: DeserializeOwned,
+    F: Format,
+{
+    pub fn from_bytes<A: AsRef<[u8]>>(data: A) -> Result<Self> {
+        F::deserialize(data.as_ref())
+    }
+}
+
+impl<T> Seal for T
+where
+    T: Serialize + DeserializeOwned,
 {
     fn seal(&self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
-        let package = ToSealRefWithKey::seal(self, &private_key)?;
+        let package = self.seal_with(&private_key)?;
         Ok((private_key, package))
     }
-}
 
-impl<T> ToSealWithKey for T
-where
-    T: Serialize + Default,
-{
-    fn seal(self, private_key: &PrivateKey) -> Result<Package<T>> {
-        ToSealRefWithKey::seal(&self, private_key)
-    }
-}
-
-impl<T> ToSealRefWithKey for T
-where
-    T: Serialize + Default,
-{
-    fn seal(&self, private_key: &PrivateKey) -> Result<Package<T>> {
+    fn seal_with(&self, private_key: &PrivateKey) -> Result<Package<T>> {
         let mut package = Package::default();
-        let inner_data = serde_json::to_vec(self)?;
-        package.signature = private_key.sign(&inner_data)?;
-        package.data = private_key.encrypt(&inner_data, Default::default())?;
-        if let Ok(public_key) = private_key.public_key() {
-            package.public_key = Some(public_key)
-        }
-        Ok(package)
-    }
-}
-
-impl<T> ToSealWithSharedKey for T
-where
-    T: Serialize + Default,
-{
-    fn seal(self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
-        ToSealRefWithSharedKey::seal(&self, private_key, public_key)
-    }
-}
-
-impl<T> ToSealRefWithSharedKey for T
-where
-    T: Serialize + Default,
-{
-    fn seal(&self, private_key: &PrivateKey, public_key: Vec<PublicKey>) -> Result<Package<T>> {
-        let mut package = Package::default();
-        let inner_data = serde_json::to_vec(self)?;
-        let sig = private_key.sign(&inner_data)?;
-        let ptype = private_key.public_key()?.key_type();
-        let key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
-        let data = private_key.encrypt(&inner_data, key::CarrierKeyType::Direct { key })?;
-
-        package.data = data;
-        package.signature = sig;
-        package.recipients = RecipientCarrier::Bundle {
-            public_keys: HashMap::from_iter(
-                public_key
-                    .iter()
-                    .filter(|public_key| public_key.key_type() == ptype)
-                    .filter_map(|public_key| {
-                        private_key
-                            .encrypt(
-                                &key,
-                                key::CarrierKeyType::Exchange {
-                                    public_key: *public_key,
-                                },
-                            )
-                            .map(|data| (*public_key, data))
-                            .ok()
-                    }),
-            ),
+        let inner = Postcard::serialize(self)?;
+        let signed = Signed {
+            signature: private_key.sign(&inner)?,
+            public_key: None,
+            data: inner,
         };
-        package.public_key = Some(private_key.public_key()?);
+        let signed = Postcard::serialize(&signed)?;
+        package.data = private_key.encrypt(&signed, Default::default())?;
         Ok(package)
     }
-}
 
-impl<T> ToOpen<T> for Package<T>
-where
-    T: DeserializeOwned,
-{
-    fn open(&self, key: &PrivateKey) -> Result<T> {
-        let data = key.decrypt(&self.data, Default::default())?;
-        key.verify(&data, &self.signature)?;
-        serde_json::from_slice(&data).map_err(Error::from)
-    }
-}
-
-impl<T> ToOpenWithPublicKey<T> for Package<T>
-where
-    T: DeserializeOwned,
-{
-    fn open(&self, key: &PrivateKey) -> Result<T> {
-        let own_pk = key.public_key()?;
-        if !self.has_recipient(&own_pk) {
-            return Err(Error::InvalidPublickey);
+    fn seal_shared(
+        &self,
+        private_key: &PrivateKey,
+        recipients: Vec<PublicKey>,
+    ) -> Result<Package<T>> {
+        if recipients.is_empty() {
+            return Err(Error::RecipientsNotAvailable);
         }
+        let mut package = Package::default();
+        let sender = private_key.public_key()?;
+        let ptype = sender.key_type();
 
-        let pk = self.public_key.as_ref().ok_or(Error::InvalidPublickey)?;
+        let inner = Postcard::serialize(self)?;
+        let data_key: [u8; 32] = key::generate::<32>().as_slice().try_into()?;
 
-        let enc_k = match &self.recipients {
-            RecipientCarrier::Bundle { public_keys } => {
-                public_keys.get(&own_pk).expect("recipient available")
+        let ephemeral = PrivateKey::new_with(match ptype {
+            PublicKeyType::Ed25519 => PrivateKeyType::Ed25519,
+            PublicKeyType::Secp256k1 => PrivateKeyType::Secp256k1,
+            PublicKeyType::P256 => PrivateKeyType::P256,
+            PublicKeyType::P384 => PrivateKeyType::P384,
+        });
+        let ephemeral_pub = ephemeral.public_key()?;
+
+        let mut public_keys = BTreeMap::new();
+        for recipient in &recipients {
+            if recipient.key_type() != ptype {
+                return Err(Error::InvalidPublicKey);
             }
-            _ => return Err(Error::RecipientsNotAvailable),
+            let wrapped = ephemeral.encrypt(
+                &data_key,
+                key::CarrierKeyType::Exchange {
+                    public_key: *recipient,
+                },
+            )?;
+            public_keys.insert(*recipient, wrapped);
+        }
+
+        let aad = recipients_aad(&ephemeral_pub, &public_keys);
+
+        let signed = Signed {
+            signature: private_key.sign(signing_transcript(&inner, &aad))?,
+            public_key: Some(sender),
+            data: inner,
         };
+        let signed = Postcard::serialize(&signed)?;
 
-        let en_key = key.decrypt(enc_k, key::CarrierKeyType::Exchange { public_key: *pk })?;
+        package.data = private_key.encrypt_with_aad(
+            &signed,
+            key::CarrierKeyType::Direct { key: data_key },
+            &aad,
+        )?;
+        package.recipients = public_keys;
+        package.public_key = Some(ephemeral_pub);
+        Ok(package)
+    }
+}
 
-        let data = key.decrypt(
-            &self.data,
-            key::CarrierKeyType::Direct {
-                key: en_key.as_slice().try_into()?,
+impl<T, F> Package<T, F>
+where
+    T: DeserializeOwned,
+{
+    pub fn open(&self, key: &PrivateKey) -> Result<T> {
+        if self.recipients.is_empty() {
+            let signed = key.decrypt(&self.data, Default::default())?;
+            let signed: Signed = Postcard::deserialize(&signed)?;
+            key.verify(&signed.data, &signed.signature)?;
+            return Postcard::deserialize(&signed.data);
+        }
+        self.open_shared_inner(key, None)
+    }
+
+    pub fn open_shared(&self, key: &PrivateKey, sender: &PublicKey) -> Result<T> {
+        self.open_shared_inner(key, Some(sender))
+    }
+
+    fn open_shared_inner(&self, key: &PrivateKey, expect: Option<&PublicKey>) -> Result<T> {
+        let own_pk = key.public_key()?;
+        let ephemeral = self.public_key.as_ref().ok_or(Error::InvalidPublicKey)?;
+
+        let enc_k = self
+            .recipients
+            .get(&own_pk)
+            .ok_or(Error::InvalidPublicKey)?;
+
+        let data_key = key.decrypt(
+            enc_k,
+            key::CarrierKeyType::Exchange {
+                public_key: *ephemeral,
             },
         )?;
 
-        pk.verify(&data, &self.signature)?;
+        let aad = recipients_aad(ephemeral, &self.recipients);
+        let signed = key.decrypt_with_aad(
+            &self.data,
+            key::CarrierKeyType::Direct {
+                key: data_key.as_slice().try_into()?,
+            },
+            &aad,
+        )?;
+        let signed: Signed = Postcard::deserialize(&signed)?;
 
-        serde_json::from_slice(&data).map_err(Error::from)
+        let sender = signed.public_key.ok_or(Error::InvalidPublicKey)?;
+        if let Some(expect) = expect
+            && sender != *expect
+        {
+            return Err(Error::InvalidPublicKey);
+        }
+        sender.verify(&signing_transcript(&signed.data, &aad), &signed.signature)?;
+
+        Postcard::deserialize(&signed.data)
     }
 }
