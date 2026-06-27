@@ -16,9 +16,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Default, Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum RecipientCarrier {
-    Direct {
-        public_key: PublicKey,
-    },
     Bundle {
         public_keys: HashMap<PublicKey, Vec<u8>>,
     },
@@ -29,7 +26,6 @@ pub enum RecipientCarrier {
 impl RecipientCarrier {
     fn recipients(&self) -> Vec<PublicKey> {
         match self {
-            RecipientCarrier::Direct { public_key } => vec![*public_key],
             RecipientCarrier::Bundle { public_keys } => {
                 public_keys.keys().copied().collect::<Vec<_>>()
             }
@@ -59,7 +55,7 @@ fn signing_transcript(data: &[u8], aad: &[u8]) -> Vec<u8> {
     transcript
 }
 
-pub trait Seal {
+pub trait Seal: Sized {
     /// Encrypt with a freshly generated [`PrivateKey`], returning it alongside the [`Package`]
     fn seal(&self) -> Result<(PrivateKey, Package<Self>)>;
 
@@ -82,7 +78,7 @@ struct Signed {
 }
 
 #[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
-pub struct Package<T: ?Sized, F = Postcard> {
+pub struct Package<T, F = Postcard> {
     data: Vec<u8>,
     public_key: Option<PublicKey>,
     recipients: RecipientCarrier,
@@ -92,7 +88,7 @@ pub struct Package<T: ?Sized, F = Postcard> {
     marker1: PhantomData<F>,
 }
 
-impl<T: ?Sized, F> Default for Package<T, F> {
+impl<T, F> Default for Package<T, F> {
     fn default() -> Self {
         Self {
             data: Vec::new(),
@@ -151,7 +147,7 @@ where
 
 impl<T> Seal for T
 where
-    T: Serialize,
+    T: Serialize + DeserializeOwned,
 {
     fn seal(&self) -> Result<(PrivateKey, Package<T>)> {
         let private_key = PrivateKey::new();
